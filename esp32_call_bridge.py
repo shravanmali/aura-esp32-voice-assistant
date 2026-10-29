@@ -266,29 +266,13 @@ class ESP32CallAudioBridge:
         self.outbound_thread = threading.Thread(target=self._run_outbound_loop, daemon=True)
         self.outbound_thread.start()
 
-        # 4. Continuous WASAPI Clock Keepalive Worker Thread (Prevents loopback clock stalling)
-        self.keepalive_thread = threading.Thread(target=self._run_silent_keepalive, daemon=True)
-        self.keepalive_thread.start()
-
-        # 5. Start Inbound Thread (WASAPI OMEN Loopback -> Downsample 48k to 16k -> ESP32 Speaker)
+        # 4. Start Inbound Thread (WASAPI OMEN Loopback -> Downsample 48k to 16k -> ESP32 Speaker)
         self.inbound_thread = threading.Thread(target=self._run_inbound_loop, daemon=True)
         self.inbound_thread.start()
 
-    def _run_silent_keepalive(self):
-        """Continuously writes 48kHz stereo silence frames so WASAPI loopback clock never stalls."""
-        silence_frame = b'\x00' * 3840
-        while self.is_active:
-            if self.silent_render_stream:
-                try:
-                    self.silent_render_stream.write(silence_frame)
-                except Exception:
-                    time.sleep(0.02)
-            else:
-                time.sleep(0.02)
-
     def is_speaker_active_in_room(self) -> bool:
         """Returns True if the ESP32 speaker is currently sounding or draining buffered audio."""
-        return (time.time() - self.last_caller_audio_time) < 0.55
+        return (time.time() - self.last_caller_audio_time) < 0.45
 
     def set_mute(self, muted: bool):
         self.is_muted = muted
@@ -366,21 +350,34 @@ class ESP32CallAudioBridge:
                 # 2. 3.2kHz Vocal Presence Equalization (+4.5dB boost for phone clarity)
                 voice_eq, self.eq_zi = signal.lfilter(self.b_eq, self.a_eq, filtered_hp, zi=self.eq_zi)
 
-                # 3. Dynamic Gain & Vocal Presence (MicroSIP has native Speex AEC enabled)
+                # 3. Dynamic Gain & Vocal Presence with Acoustic Echo Cancellation
                 mic_rms = float(np.sqrt(np.mean(voice_eq ** 2)))
                 now_ts = time.time()
                 time_since_caller = now_ts - self.last_caller_audio_time
-                speaker_active = (self.caller_speaker_rms > 120.0) and (time_since_caller < 0.35)
+                speaker_active = (self.caller_speaker_rms > 35.0) or (time_since_caller < 0.45)
 
                 if speaker_active:
-                    # When caller is speaking loudly through the ESP32 speaker, apply mild echo damping
-                    target_gain = 0.50 if mic_rms < 300.0 else 1.20
+                    # When caller is speaking or speaker is active in room:
+                    # Attenuate mic completely so caller hears ZERO echo of themselves!
+                    target_gain = 0.0
                 else:
-                    # Full duplex speech transmission: loud, crisp, and clear
-                    target_gain = 1.80
+                    # Full duplex speech transmission when speaker is silent
+                    if mic_rms < 90.0:
+                        target_gain = 0.05  # Room noise floor gate
+                    else:
+                        target_gain = 1.80  # Full clear vocal boost
 
                 # Smooth gain transition (20ms time constant) to prevent audible clicks/pops
                 self.current_out_gain = 0.70 * self.current_out_gain + 0.30 * target_gain
+
+                if self.current_out_gain < 0.01:
+                    silence_frame = b'\x00' * (out_samples_target * 4)
+                    try:
+                        self.outbound_stream.write(silence_frame)
+                    except Exception:
+                        pass
+                    continue
+
                 boosted = voice_eq * self.current_out_gain
 
                 # 4. Anti-clipping soft tanh compression above 26000
@@ -427,8 +424,30 @@ class ESP32CallAudioBridge:
             )
             print("[AUDIO BRIDGE] Ultra-Low Latency Inbound Stream Active (OMEN Digital Loopback -> ESP32 Speaker @ 20ms frames).")
 
-            frames_read = 0
+            # Prime the clock with a tiny silent frame
+            if self.silent_render_stream:
+                try:
+                    self.silent_render_stream.write(b'\x00' * 3840)
+                except Exception:
+                    pass
+
+            last_clock_tick = time.time()
+            last_sent_time = 0.0
+
+            # Pre-allocated 20ms silence buffer for keepalive
+            silence_keepalive = b'\x00' * 640
+
             while self.is_active:
+                now = time.time()
+                # Keep WASAPI loopback clock alive during quiet periods
+                if now - last_clock_tick > 0.08:
+                    if self.silent_render_stream:
+                        try:
+                            self.silent_render_stream.write(b'\x00' * 3840)
+                        except Exception:
+                            pass
+                    last_clock_tick = now
+
                 data = in_stream.read(960, exception_on_overflow=False)
                 if not data or len(data) < 3840:
                     continue
@@ -444,20 +463,22 @@ class ESP32CallAudioBridge:
                 instant_rms = float(np.sqrt(np.mean(mono_16k ** 2)))
                 self.caller_speaker_rms = 0.70 * self.caller_speaker_rms + 0.30 * instant_rms
 
-                now = time.time()
                 # Whenever caller speech or ringtone is present, mark the acoustic speaker active timestamp
-                if instant_rms > 90.0:
+                if instant_rms > 35.0:
                     self.last_caller_audio_time = now
 
-                frames_read += 1
-                if frames_read % 100 == 0:
-                    print(f"[AUDIO BRIDGE INBOUND]: Streaming caller audio (Instant RMS: {instant_rms:.1f}, Avg RMS: {self.caller_speaker_rms:.1f})")
-
-                # Forward continuous 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker with 1.8x vocal boost
+                # Forward 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
+                # If caller speech or ringtone is present (> 35 RMS): send real audio immediately (< 20ms latency).
+                # If dead silent (< 35 RMS): pace pure zero-bytes keepalive at 70ms to prevent driver underrun without buzz/hiss!
                 if self.send_to_esp32_fn:
-                    boosted_caller = np.clip(mono_16k * 1.8, -32767.0, 32767.0)
-                    pcm_out = boosted_caller.astype(np.int16).tobytes()
-                    self.send_to_esp32_fn(pcm_out)
+                    if self.caller_speaker_rms > 35.0:
+                        boosted_caller = np.clip(mono_16k * 1.5, -32767.0, 32767.0)
+                        pcm_out = boosted_caller.astype(np.int16).tobytes()
+                        self.send_to_esp32_fn(pcm_out)
+                        last_sent_time = now
+                    elif (now - last_sent_time) > 0.070:
+                        self.send_to_esp32_fn(silence_keepalive)
+                        last_sent_time = now
 
             in_stream.stop_stream()
             in_stream.close()
