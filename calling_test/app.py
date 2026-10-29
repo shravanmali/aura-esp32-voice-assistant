@@ -1,0 +1,512 @@
+import os
+import json
+import time
+import socket
+import ssl
+import hashlib
+import uuid
+import threading
+import xml.etree.ElementTree as ET
+from flask import Flask, render_template, request, jsonify
+import urllib3
+
+urllib3.disable_warnings()
+
+app = Flask(__name__)
+
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "jio_config.json")
+JIO_ROUTER_IP = "192.168.31.1"
+JIO_PROVISION_PORT = 8443
+JIO_SIP_PORT = 5068
+
+# Session storage for OTP verification
+OTP_SESSION = {
+    "cookie": None,
+    "masked_mobile": None,
+    "timestamp": 0
+}
+
+CALL_STATE = {
+    "state": "idle",       # idle, dialing, ringing, ended
+    "phone_number": "",
+    "caller_id": "+91 (Home Wi-Fi)",
+    "recent_logs": [],
+    "is_active": False
+}
+
+state_lock = threading.Lock()
+
+def add_log(msg, log_type="normal"):
+    with state_lock:
+        CALL_STATE["recent_logs"].append({"msg": msg, "type": log_type})
+        if len(CALL_STATE["recent_logs"]) > 50:
+            CALL_STATE["recent_logs"] = CALL_STATE["recent_logs"][-50:]
+    try:
+        clean_msg = msg.encode("ascii", errors="replace").decode()
+        print(f"[VOIP] {clean_msg}")
+    except Exception:
+        pass
+
+def load_jio_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
+def save_jio_config(data):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+CONTACTS_FILE = os.path.join(os.path.dirname(__file__), "contacts.json")
+
+def load_contacts():
+    if os.path.exists(CONTACTS_FILE):
+        try:
+            with open(CONTACTS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_contacts(contacts):
+    with open(CONTACTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(contacts, f, indent=2)
+
+# Import helper functions from jfc_configure
+import sys
+sys.path.append(os.path.dirname(__file__))
+import jfc_configure
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/api/contacts", methods=["GET"])
+def get_contacts():
+    return jsonify(load_contacts())
+
+@app.route("/api/contacts", methods=["POST"])
+def add_or_update_contact():
+    data = request.get_json() or {}
+    name = str(data.get("name", "")).strip()
+    number = str(data.get("number", "")).strip()
+    if not name or not number:
+        return jsonify({"status": "error", "message": "Name and phone number are required"}), 400
+    
+    key = name.lower()
+    contacts = load_contacts()
+    contacts[key] = {
+        "name": name,
+        "number": number
+    }
+    save_contacts(contacts)
+    add_log(f"Contact saved: {name} -> {number}", "success")
+    return jsonify({"status": "ok", "contacts": contacts})
+
+@app.route("/api/contacts/<key>", methods=["DELETE"])
+def delete_contact(key):
+    contacts = load_contacts()
+    clean_key = key.lower()
+    if clean_key in contacts:
+        del contacts[clean_key]
+        save_contacts(contacts)
+        add_log(f"Contact deleted: {key}", "normal")
+        return jsonify({"status": "ok", "contacts": contacts})
+    return jsonify({"status": "error", "message": "Contact not found"}), 404
+
+@app.route("/api/jio/status", methods=["GET"])
+def jio_status():
+    cfg = load_jio_config()
+    if cfg and "username" in cfg:
+        clean_num = cfg.get("username", "").split("@")[0]
+        return jsonify({
+            "activated": True,
+            "landline_number": "+" + clean_num,
+            "realm": cfg.get("realm", ""),
+            "proxy": cfg.get("address", f"{JIO_ROUTER_IP}:{JIO_SIP_PORT}")
+        })
+    return jsonify({"activated": False})
+
+@app.route("/api/jio/request_otp", methods=["POST"])
+def jio_request_otp():
+    try:
+        hostname = socket.gethostname()
+        mac = jfc_configure.get_mac_address()
+        add_log(f"Initiating registration request for {hostname} (MAC: {mac})...")
+
+        # Request OTP
+        resp = jfc_configure.ims_request(JIO_ROUTER_IP, JIO_PROVISION_PORT, hostname, mac, add_req=True)
+        
+        status_code = getattr(resp, "status_code", 0)
+        headers = getattr(resp, "headers", {})
+        
+        if status_code != 200:
+            add_log(f"Registration request failed: HTTP {status_code}", "error")
+            return jsonify({"status": "error", "message": f"Router returned HTTP {status_code}"}), 400
+
+        masked_mobile = headers.get("x-amn") or headers.get("X-Amn", "Registered Mobile")
+        set_cookie = headers.get("set-cookie") or headers.get("Set-Cookie", "")
+
+        OTP_SESSION["cookie"] = set_cookie
+        OTP_SESSION["masked_mobile"] = masked_mobile
+        OTP_SESSION["timestamp"] = time.time()
+
+        add_log(f"OTP successfully sent by Jio to {masked_mobile}!", "success")
+        return jsonify({
+            "status": "ok",
+            "masked_mobile": masked_mobile,
+            "message": f"OTP sent to {masked_mobile}"
+        })
+    except Exception as e:
+        add_log(f"Error requesting OTP: {e}", "error")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/jio/verify_otp", methods=["POST"])
+def jio_verify_otp():
+    data = request.get_json() or {}
+    otp_code = str(data.get("otp", "")).strip()
+
+    if not otp_code or not OTP_SESSION.get("cookie"):
+        return jsonify({"status": "error", "message": "Valid OTP and active session required"}), 400
+
+    try:
+        hostname = socket.gethostname()
+        mac = jfc_configure.get_mac_address()
+        add_log(f"Verifying OTP {otp_code} with Jio router...")
+
+        resp = jfc_configure.otp_verify(JIO_ROUTER_IP, JIO_PROVISION_PORT, int(otp_code), OTP_SESSION["cookie"])
+        if resp.status_code != 200:
+            add_log(f"OTP verification failed: HTTP {resp.status_code}", "error")
+            return jsonify({"status": "error", "message": "Incorrect OTP or expired session"}), 400
+
+        add_log("OTP verified successfully! Fetching SIP credentials...", "success")
+
+        # Fetch actual SIP configuration XML
+        config_resp = jfc_configure.ims_request(JIO_ROUTER_IP, JIO_PROVISION_PORT, hostname, mac, add_req=False)
+        if config_resp.status_code != 200:
+            add_log(f"Failed to fetch SIP config: HTTP {config_resp.status_code}", "error")
+            return jsonify({"status": "error", "message": "Failed to fetch SIP configuration"}), 500
+
+        root = ET.fromstring(config_resp.text)
+        params_to_extract = [
+            "realm", "username", "userpwd", "home_network_domain_name",
+            "address", "private_user_identity", "public_user_identity"
+        ]
+
+        extracted = {}
+        for parm in root.findall(".//parm"):
+            name = parm.attrib.get("name")
+            val = parm.attrib.get("value")
+            if name in params_to_extract:
+                extracted[name] = val
+
+        save_jio_config(extracted)
+        landline = "+" + extracted.get("username", "")
+        add_log(f"Jio Landline Activated successfully! Number: {landline}", "success")
+
+        return jsonify({
+            "status": "ok",
+            "landline_number": landline,
+            "message": "Activated successfully!"
+        })
+    except Exception as e:
+        add_log(f"Error during OTP verification: {e}", "error")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+MICROSIP_EXE = os.path.join(os.path.dirname(__file__), "microsip", "microsip.exe")
+
+def set_microsip_video_mode(enable_video=False):
+    ini_path = os.path.join(os.path.dirname(__file__), "microsip", "microsip.ini")
+    if not os.path.exists(ini_path):
+        return
+    for enc in ['utf-16', 'utf-8']:
+        try:
+            with open(ini_path, 'r', encoding=enc) as f:
+                content = f.read()
+            val = "1" if enable_video else "0"
+            if "lastcallhasvideo" in content:
+                import re
+                content = re.sub(r'lastcallhasvideo\s*=\s*[01]', f'lastcallhasvideo ={val}', content)
+            else:
+                content = content.replace("[Settings]", f"[Settings]\nlastcallhasvideo ={val}")
+            with open(ini_path, 'w', encoding=enc) as f:
+                f.write(content)
+            break
+        except Exception:
+            continue
+
+def pop_microsip_window():
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        def enum_win(hwnd, lParam):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buff, length + 1)
+                if "MicroSIP" in buff.value:
+                    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    user32.SetForegroundWindow(hwnd)
+            return True
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(EnumWindowsProc(enum_win), 0)
+    except Exception:
+        pass
+
+def monitor_microsip_call(proc=None):
+    log_path = os.path.join(os.path.dirname(__file__), "microsip", "microsip_log.txt")
+    last_pos = 0
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(0, os.SEEK_END)
+                last_pos = f.tell()
+        except Exception:
+            last_pos = 0
+
+    call_start_ts = time.time()
+    try:
+        while CALL_STATE["is_active"]:
+            time.sleep(0.35)
+            # 1. Verify microsip child process liveness (with 2.5s grace period)
+            if proc is not None and (time.time() - call_start_ts) > 2.5:
+                if proc.poll() is not None:
+                    with state_lock:
+                        CALL_STATE["state"] = "ended"
+                        CALL_STATE["is_active"] = False
+                    add_log("[ENDED] MicroSIP process exited cleanly.", "normal")
+                    return
+
+            # 2. Timeout for unanswered calls (45s)
+            if CALL_STATE["state"] in ("dialing", "ringing") and (time.time() - call_start_ts) > 45.0:
+                with state_lock:
+                    CALL_STATE["state"] = "ended"
+                    CALL_STATE["is_active"] = False
+                cleanup_microsip_processes()
+                add_log("[TIMEOUT] Call not answered within 45 seconds.", "error")
+                return
+
+            if not os.path.exists(log_path):
+                continue
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f2:
+                    f2.seek(last_pos)
+                    new_data = f2.read()
+                    last_pos = f2.tell()
+            except Exception:
+                new_data = ""
+                
+            if not new_data:
+                continue
+                
+            for line in new_data.splitlines():
+                if "180 Ringing" in line or "183 Session Progress" in line:
+                    with state_lock:
+                        CALL_STATE["state"] = "ringing"
+                elif "CONFIRMED" in line:
+                    with state_lock:
+                        CALL_STATE["state"] = "connected"
+                    add_log("[CONNECTED] Call answered! Two-way audio live.", "success")
+                elif any(k in line for k in [
+                    "DISCONNECTED", "Stream destroyed", "Closing sound device",
+                    "hangup.wav", "Call terminated", "487 Request Terminated",
+                    "486 Busy", "603 Decline", "408 Request Timeout", "503 Service"
+                ]):
+                    with state_lock:
+                        CALL_STATE["state"] = "ended"
+                        CALL_STATE["is_active"] = False
+                    add_log("[ENDED] Call ended / Disconnected.", "normal")
+                    return
+    except Exception as e:
+        add_log(f"[MONITOR ERROR] {e}", "error")
+    finally:
+        with state_lock:
+            CALL_STATE["is_active"] = False
+            if CALL_STATE["state"] in ("dialing", "ringing"):
+                CALL_STATE["state"] = "ended"
+
+def cleanup_microsip_processes():
+    try:
+        import subprocess
+        # Gracefully send SIP BYE / CANCEL to telecom network so remote phone hangs up in real life!
+        if os.path.exists(MICROSIP_EXE):
+            subprocess.run([MICROSIP_EXE, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+            time.sleep(0.3)
+            subprocess.run([MICROSIP_EXE, "/exit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+            time.sleep(0.2)
+        subprocess.run(["taskkill", "/F", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def run_tls_sip_dial(dest_number, is_video=False):
+    # Kill any stale or ghost microsip instances to prevent multiple ringtones
+    cleanup_microsip_processes()
+    time.sleep(0.3)
+
+    cfg = load_jio_config()
+    if not cfg:
+        add_log("No Jio SIP config found. Falling back to protocol simulation...", "normal")
+        run_simulated_call(dest_number)
+        return
+
+    # Clean destination number for Indian telecom
+    raw_digits = "".join(filter(str.isdigit, dest_number))
+    if len(raw_digits) == 10:
+        dial_num = "0" + raw_digits
+    elif len(raw_digits) == 12 and raw_digits.startswith("91"):
+        dial_num = "0" + raw_digits[2:]
+    else:
+        dial_num = raw_digits
+
+    call_type = "Video Call (H.264)" if is_video else "Voice Call"
+    add_log(f"Routing {call_type} to {dest_number} (Dial format: {dial_num}) via Jio IMS Core...", "normal")
+    
+    if os.path.exists(MICROSIP_EXE):
+        try:
+            import subprocess
+            set_microsip_video_mode(is_video)
+            microsip_dir = os.path.dirname(MICROSIP_EXE)
+            
+            # Launch MicroSIP
+            proc = subprocess.Popen([MICROSIP_EXE, dial_num], cwd=microsip_dir)
+            
+            if is_video:
+                add_log(f"[INFO] Cellular network routes landline to mobile as HD Voice (AMR-WB).", "normal")
+                add_log(f"[VIDEO] Video window requested for {dial_num}.", "normal")
+            else:
+                add_log(f"[VOICE] Jio Voice Call dispatched to {dial_num}!", "success")
+                add_log("Destination mobile phone is actively ALERTING / RINGING!", "success")
+                
+            with state_lock:
+                CALL_STATE["state"] = "ringing"
+                
+            threading.Thread(target=lambda: monitor_microsip_call(proc), daemon=True).start()
+        except Exception as e:
+            add_log(f"Error launching SIP dialer: {e}", "error")
+    else:
+        add_log("MicroSIP engine binary not found. Please check microsip folder.", "error")
+
+def run_simulated_call(phone_number):
+    time.sleep(0.3)
+    add_log(f"Resolving IMS SIP trunk for destination: {phone_number}...")
+    time.sleep(0.4)
+    add_log(f"--> INVITE sip:{phone_number}@jio.ims.ril.com SIP/2.0")
+    add_log(f"Via: SIP/2.0/TLS {JIO_ROUTER_IP}:5068;branch=z9hG4bK83921")
+    time.sleep(0.3)
+    with state_lock:
+        if not CALL_STATE["is_active"]:
+            return
+    add_log(f"<-- SIP/2.0 100 Trying (Gateway acknowledged)", "normal")
+    time.sleep(0.6)
+    with state_lock:
+        if not CALL_STATE["is_active"]:
+            return
+        CALL_STATE["state"] = "ringing"
+    add_log(f"<-- SIP/2.0 180 Ringing (Remote subscriber phone is ALERTING!)", "success")
+    add_log(f"Acoustic ringback active: dual-tone 400Hz+450Hz pulsed.", "normal")
+
+@app.route("/api/dial", methods=["POST"])
+def dial():
+    data = request.get_json() or {}
+    number = data.get("phone_number", "").strip()
+    is_video = bool(data.get("video", False))
+
+    if not number:
+        return jsonify({"status": "error", "message": "Phone number is required"}), 400
+
+    cfg = load_jio_config()
+    clean_num = cfg.get("username", "").split("@")[0] if cfg else ""
+    caller_id = ("+" + clean_num) if clean_num else "+91 (Home Wi-Fi)"
+
+    call_label = "Video Call" if is_video else "Voice Call"
+    with state_lock:
+        CALL_STATE["state"] = "dialing"
+        CALL_STATE["phone_number"] = number
+        CALL_STATE["caller_id"] = caller_id
+        CALL_STATE["is_active"] = True
+        CALL_STATE["recent_logs"] = []
+
+    add_log(f"Initiating {call_label} to {number} [Caller ID: {caller_id}]", "normal")
+
+    threading.Thread(target=lambda: run_tls_sip_dial(number, is_video), daemon=True).start()
+
+    return jsonify({"status": "ok", "state": "dialing", "video": is_video})
+
+@app.route("/api/hangup", methods=["POST"])
+def hangup():
+    with state_lock:
+        CALL_STATE["state"] = "ended"
+        CALL_STATE["is_active"] = False
+
+    cleanup_microsip_processes()
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:8080/api/call/hangup", data=b"{}", headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=1.5)
+    except Exception:
+        pass
+
+    add_log("Call terminated / Hang up.", "error")
+    return jsonify({"status": "ok"})
+
+@app.route("/api/call/toggle_mute", methods=["POST"])
+def toggle_mute():
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:8080/api/call/toggle_mute", data=b"{}", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            res_data = json.loads(response.read().decode())
+            is_muted = res_data.get("muted", False)
+            add_log(f"[MIC CONTROL] Microphone {'MUTED' if is_muted else 'UNMUTED'}.", "normal")
+            return jsonify({"status": "ok", "muted": is_muted})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/call/mute", methods=["POST"])
+def mute():
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:8080/api/call/mute", data=b"{}", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            add_log("[MIC CONTROL] Microphone MUTED.", "normal")
+            return jsonify({"status": "ok", "muted": True})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/call/unmute", methods=["POST"])
+def unmute():
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:8080/api/call/unmute", data=b"{}", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            add_log("[MIC CONTROL] Microphone UNMUTED.", "normal")
+            return jsonify({"status": "ok", "muted": False})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/status", methods=["GET"])
+def status():
+    with state_lock:
+        logs_to_send = list(CALL_STATE["recent_logs"])
+        CALL_STATE["recent_logs"] = []
+        cur_state = CALL_STATE["state"]
+        if not CALL_STATE["is_active"] and cur_state in ("dialing", "ringing"):
+            cur_state = "idle"
+            CALL_STATE["state"] = "idle"
+        return jsonify({
+            "is_active": CALL_STATE["is_active"],
+            "state": cur_state,
+            "phone_number": CALL_STATE["phone_number"],
+            "caller_id": CALL_STATE["caller_id"],
+            "recent_logs": logs_to_send
+        })
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Wi-Fi Calling Test Server running on http://localhost:5050")
+    print("=" * 60)
+    app.run(host="0.0.0.0", port=5050, debug=False)

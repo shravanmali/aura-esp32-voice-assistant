@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wi-Fi Landline Calling Testbed - Jio AirFiber</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 49, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --primary: #10b981;
+      --primary-hover: #059669;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --terminal-bg: #050811;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px;
+      background-image: 
+        radial-gradient(circle at 15% 20%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 80%, rgba(59, 130, 246, 0.08) 0%, transparent 40%);
+    }
+
+    .main-wrapper {
+      width: 100%;
+      max-width: 940px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Top Activation Banner */
+    .activation-card {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 18px;
+      padding: 20px 24px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .activation-info h2 {
+      font-size: 17px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #93c5fd;
+    }
+
+    .activation-info p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .activation-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .otp-input-group {
+      display: none;
+      gap: 8px;
+    }
+
+    .otp-input {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 15px;
+      font-family: monospace;
+      letter-spacing: 2px;
+      width: 130px;
+      text-align: center;
+      outline: none;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      margin-bottom: 20px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .info-strip {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .info-strip .label {
+      color: var(--text-muted);
+    }
+
+    .info-strip .val {
+      font-weight: 600;
+      color: #60a5fa;
+      font-family: monospace;
+    }
+
+    .display-box {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      text-align: right;
+    }
+
+    .phone-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-size: 26px;
+      font-family: monospace;
+      letter-spacing: 2px;
+      text-align: right;
+    }
+
+    .phone-input::placeholder {
+      color: rgba(255, 255, 255, 0.2);
+    }
+
+    .keypad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .key {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 0;
+      font-size: 20px;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    }
+
+    .key span.sub {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    .key:hover {
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .key:active {
+      transform: translateY(1px);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .action-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-lg {
+      flex: 1;
+      padding: 16px;
+      font-size: 16px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-dial {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-dial:hover {
+      background: var(--primary-hover);
+      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-video {
+      background: #3b82f6;
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn-video:hover {
+      background: #2563eb;
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-hangup {
+      background: var(--danger);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-hangup:hover {
+      background: var(--danger-hover);
+    }
+
+    .btn-backspace {
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+      flex: 0 0 60px;
+    }
+
+    .status-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .state-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .pulse-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+
+    .pulse-dot.dialing {
+      background: #f59e0b;
+      animation: pulse 1s infinite;
+    }
+
+    .pulse-dot.ringing {
+      background: #10b981;
+      animation: pulse 0.7s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.7; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.7; }
+    }
+
+    .state-text {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .terminal {
+      flex: 1;
+      background: var(--terminal-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #a7f3d0;
+      overflow-y: auto;
+      height: 380px;
+      display: flex;
+      flex-direction: column-reverse;
+    }
+
+    .log-line {
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .log-time {
+      color: #6b7280;
+      margin-right: 8px;
+    }
+
+    .log-error {
+      color: #f87171;
+    }
+
+    .log-success {
+      color: #34d399;
+      font-weight: bold;
+    }
+
+    /* Contacts Section */
+    .contacts-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 20px 24px;
+      backdrop-filter: blur(12px);
+    }
+    .contacts-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .contacts-title {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+    .contact-form {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .contact-input {
+      flex: 1;
+      min-width: 140px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+    .contact-input:focus {
+      border-color: var(--accent);
+    }
+    .contacts-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .contact-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s ease;
+    }
+    .contact-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .contact-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .contact-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: #fff;
+    }
+    .contact-number {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+    .contact-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-call-mini {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .btn-call-mini:hover {
+      background: #10b981;
+      color: #fff;
+    }
+    .btn-del-mini {
+      background: transparent;
+      border: none;
+      color: #ef4444;
+      cursor: pointer;
+      padding: 6px;
+      font-size: 14px;
+      opacity: 0.6;
+      transition: all 0.15s ease;
+    }
+    .btn-del-mini:hover {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="main-wrapper">
+    <!-- Top Card: Jio Landline Activation -->
+    <div class="activation-card" id="activationCard">
+      <div class="activation-info">
+        <h2 id="activationTitle">📡 Jio AirFiber Router Detected (192.168.31.1)</h2>
+        <p id="activationDesc">Register this PC via one-time OTP to enable direct browser ringing to your Mom's phone.</p>
+      </div>
+
+      <div class="activation-actions">
+        <button id="reqOtpBtn" class="btn btn-primary" onclick="requestOtp()">
+          <span>📲 Send OTP to Registered Jio Number</span>
+        </button>
+
+        <div id="otpGroup" class="otp-input-group">
+          <input type="text" id="otpInput" class="otp-input" placeholder="6-digit OTP" maxlength="6" />
+          <button class="btn btn-dial" onclick="verifyOtp()">
+            <span>Verify & Activate</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Middle Card: Saved Contacts Book -->
+    <div class="contacts-card">
+      <div class="contacts-header">
+        <div class="contacts-title">
+          <span>📖 Saved Contacts Book</span>
+          <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: none;" id="contactsCountBadge">0 Contacts</span>
+        </div>
+      </div>
+      
+      <div class="contact-form">
+        <input type="text" id="newContactName" class="contact-input" placeholder="Name (e.g. Mom, Dad, Home)" />
+        <input type="tel" id="newContactNumber" class="contact-input" placeholder="Phone Number (e.g. 08767322517)" />
+        <button class="btn btn-primary" onclick="addContact()">
+          <span>➕ Save Contact</span>
+        </button>
+      </div>
+
+      <div class="contacts-list" id="contactsListContainer">
+        <!-- Contact items rendered dynamically -->
+      </div>
+    </div>
+
+    <div class="container">
+      <!-- Left Card: Dial Pad & Input -->
+      <div class="card">
+        <div class="header">
+          <span class="badge">Jio AirFiber SIP Trunk</span>
+          <h1>📞 Landline Phone Ring</h1>
+          <p class="subtitle">Direct browser phone calls over your Home Wi-Fi line</p>
+        </div>
+
+        <div class="info-strip">
+          <span class="label">Caller ID (Your Landline):</span>
+          <span class="val" id="callerIdVal">+91 (Home Wi-Fi)</span>
+        </div>
+
+        <div class="display-box">
+          <input 
+            type="tel" 
+            id="phoneInput" 
+            class="phone-input" 
+            placeholder="+91 8767322517" 
+            value="+91 8767322517" 
+            autofocus 
+          />
+        </div>
+
+        <div class="keypad">
+          <button class="key" onclick="appendKey('1')">1<span class="sub">&nbsp;</span></button>
+          <button class="key" onclick="appendKey('2')">2<span class="sub">ABC</span></button>
+          <button class="key" onclick="appendKey('3')">3<span class="sub">DEF</span></button>
+          <button class="key" onclick="appendKey('4')">4<span class="sub">GHI</span></button>
+          <button class="key" onclick="appendKey('5')">5<span class="sub">JKL</span></button>
+          <button class="key" onclick="appendKey('6')">6<span class="sub">MNO</span></button>
+          <button class="key" onclick="appendKey('7')">7<span class="sub">PQRS</span></button>
+          <button class="key" onclick="appendKey('8')">8<span class="sub">TUV</span></button>
+          <button class="key" onclick="appendKey('9')">9<span class="sub">WXYZ</span></button>
+          <button class="key" onclick="appendKey('*')">*<span class="sub">&nbsp;</span></button>
+          <button class="key" onclick="appendKey('0')">0<span class="sub">+</span></button>
+          <button class="key" onclick="appendKey('#')">#<span class="sub">&nbsp;</span></button>
+        </div>
+
+        <div class="action-row">
+          <button id="dialBtn" class="btn btn-dial btn-lg" onclick="startCall(false)">
+            <span>📞 VOICE CALL</span>
+          </button>
+          <button id="videoBtn" class="btn btn-video btn-lg" onclick="startCall(true)">
+            <span>📹 VIDEO CALL</span>
+          </button>
+          <button id="hangupBtn" class="btn btn-hangup btn-lg" onclick="hangupCall()" style="display: none;">
+            <span>📴 HANG UP</span>
+          </button>
+          <button id="muteBtn" class="btn btn-lg" onclick="toggleMute()" style="display: none; background: #eab308; color: #000; font-weight: bold; border-radius: 12px; padding: 12px 18px; border: none; cursor: pointer;">
+            <span id="muteBtnText">🎤 MUTE MIC</span>
+          </button>
+          <button class="btn btn-backspace" onclick="backspaceKey()" title="Backspace">⌫</button>
+        </div>
+      </div>
+
+      <!-- Right Card: Call Status & SIP Protocol Logs -->
+      <div class="card status-panel">
+        <div class="state-indicator">
+          <div id="pulseDot" class="pulse-dot"></div>
+          <div id="stateText" class="state-text">Ready to dial</div>
+        </div>
+
+        <div class="terminal" id="terminalLog">
+          <!-- Log lines injected here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let audioCtx = null;
+    let ringInterval = null;
+    let pollInterval = null;
+    let isCalling = false;
+
+    // Web Audio Ringback Synthesizer removed to prevent overlapping with real carrier audio
+    function playIndianRingbackTone() {}
+    function stopRingbackTone() {}
+
+    function appendKey(val) {
+      const input = document.getElementById("phoneInput");
+      input.value += val;
+    }
+
+    function backspaceKey() {
+      const input = document.getElementById("phoneInput");
+      input.value = input.value.slice(0, -1);
+    }
+
+    function appendLog(text, type = "normal") {
+      const term = document.getElementById("terminalLog");
+      const line = document.createElement("div");
+      line.className = "log-line " + (type === "error" ? "log-error" : type === "success" ? "log-success" : "");
+
+      const now = new Date();
+      const timeStr = now.toTimeString().split(" ")[0] + "." + String(now.getMilliseconds()).padStart(3, "0");
+
+      line.innerHTML = `<span class="log-time">[${timeStr}]</span> ${text}`;
+      term.insertBefore(line, term.firstChild);
+    }
+
+    async function checkJioStatus() {
+      try {
+        const resp = await fetch("/api/jio/status");
+        const data = await resp.json();
+        if (data.activated) {
+          const displayNum = (data.landline_number || "").split("@")[0];
+          document.getElementById("activationTitle").innerHTML = "🟢 Jio Home Landline Activated: " + displayNum;
+          document.getElementById("activationDesc").innerText = "Direct browser calling is active. Calls route via Jio IMS Core (" + data.proxy + ").";
+          document.getElementById("reqOtpBtn").style.display = "none";
+          document.getElementById("otpGroup").style.display = "none";
+          document.getElementById("callerIdVal").innerText = displayNum;
+          appendLog("Jio Landline registered: " + displayNum, "success");
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function requestOtp() {
+      const btn = document.getElementById("reqOtpBtn");
+      btn.disabled = true;
+      btn.innerText = "⏳ Requesting OTP from Jio...";
+      appendLog("Requesting OTP handshake from Jio router (192.168.31.1:8443)...");
+
+      try {
+        const resp = await fetch("/api/jio/request_otp", { method: "POST" });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          btn.style.display = "none";
+          document.getElementById("otpGroup").style.display = "flex";
+          document.getElementById("activationDesc").innerText = "OTP successfully sent to your mobile: " + (data.masked_mobile || "Registered Phone");
+          appendLog("OTP sent successfully to " + data.masked_mobile, "success");
+          document.getElementById("otpInput").focus();
+        } else {
+          alert("Error: " + data.message);
+          btn.disabled = false;
+          btn.innerText = "📲 Send OTP to Registered Jio Number";
+        }
+      } catch (e) {
+        alert("Failed to connect to router: " + e);
+        btn.disabled = false;
+        btn.innerText = "📲 Send OTP to Registered Jio Number";
+      }
+    }
+
+    async function verifyOtp() {
+      const otp = document.getElementById("otpInput").value.trim();
+      if (!otp || otp.length < 4) {
+        alert("Please enter the OTP received on your mobile");
+        return;
+      }
+
+      appendLog("Verifying OTP with Jio router...");
+      try {
+        const resp = await fetch("/api/jio/verify_otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ otp: otp })
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          appendLog("OTP verified! Jio Landline active: " + data.landline_number, "success");
+          checkJioStatus();
+        } else {
+          alert("Verification failed: " + data.message);
+        }
+      } catch (e) {
+        alert("Error: " + e);
+      }
+    }
+
+    async function startCall(isVideo = false) {
+      const number = document.getElementById("phoneInput").value.trim();
+      if (!number) {
+        alert("Please enter a valid phone number!");
+        return;
+      }
+
+      isCalling = true;
+      document.getElementById("dialBtn").style.display = "none";
+      document.getElementById("videoBtn").style.display = "none";
+      document.getElementById("hangupBtn").style.display = "flex";
+      document.getElementById("muteBtn").style.display = "flex";
+
+      const dot = document.getElementById("pulseDot");
+      const statusText = document.getElementById("stateText");
+
+      dot.className = "pulse-dot dialing";
+      statusText.innerText = (isVideo ? "Starting Video Call to " : "Dialing ") + number + "...";
+
+      appendLog(`Initiating ${isVideo ? '📹 Video Call (H.264 / Camera)' : '📞 Voice Call'} to ${number} via Jio Landline...`);
+
+      try {
+        const resp = await fetch("/api/dial", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone_number: number, video: isVideo })
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          pollStatus();
+        } else {
+          appendLog(`Dial error: ${data.message}`, "error");
+          hangupCall();
+        }
+      } catch (err) {
+        appendLog(`Network error contacting server: ${err}`, "error");
+        hangupCall();
+      }
+    }
+
+    function pollStatus() {
+      if (pollInterval) clearInterval(pollInterval);
+
+      pollInterval = setInterval(async () => {
+        if (!isCalling) {
+          clearInterval(pollInterval);
+          return;
+        }
+
+        try {
+          const resp = await fetch("/api/status");
+          const state = await resp.json();
+
+          const dot = document.getElementById("pulseDot");
+          const statusText = document.getElementById("stateText");
+
+          if (state.state === "dialing") {
+            dot.className = "pulse-dot dialing";
+            statusText.innerText = "Connecting to Jio IMS Core...";
+          } else if (state.state === "ringing") {
+            dot.className = "pulse-dot ringing";
+            statusText.innerText = "📞 Destination Phone is RINGING...";
+          } else if (state.state === "connected") {
+            dot.className = "pulse-dot ringing";
+            dot.style.background = "#10b981";
+            statusText.innerText = "🟢 CALL CONNECTED (Speaking Live)";
+          } else if (state.state === "ended" || state.state === "idle") {
+            hangupCall();
+          }
+
+          if (state.recent_logs && state.recent_logs.length > 0) {
+            state.recent_logs.forEach(l => {
+              appendLog(l.msg, l.type);
+            });
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 350);
+    }
+
+    let isMuted = false;
+    async function toggleMute() {
+      try {
+        const res = await fetch("/api/call/toggle_mute", { method: "POST" });
+        const data = await res.json();
+        isMuted = data.muted;
+        const muteText = document.getElementById("muteBtnText");
+        const muteBtn = document.getElementById("muteBtn");
+        if (isMuted) {
+          muteText.innerText = "🔇 UNMUTE MIC";
+          muteBtn.style.background = "#ef4444";
+          muteBtn.style.color = "#fff";
+        } else {
+          muteText.innerText = "🎤 MUTE MIC";
+          muteBtn.style.background = "#eab308";
+          muteBtn.style.color = "#000";
+        }
+      } catch (err) {
+        console.error("Error toggling mute:", err);
+      }
+    }
+
+    async function hangupCall() {
+      isCalling = false;
+      stopRingbackTone();
+
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+
+      document.getElementById("dialBtn").style.display = "flex";
+      document.getElementById("videoBtn").style.display = "flex";
+      document.getElementById("hangupBtn").style.display = "none";
+      document.getElementById("muteBtn").style.display = "none";
+
+      const dot = document.getElementById("pulseDot");
+      const statusText = document.getElementById("stateText");
+
+      dot.className = "pulse-dot";
+      statusText.innerText = "Call Ended (Idle)";
+
+      appendLog("Call terminated / Hang up.", "error");
+
+      try {
+        await fetch("/api/hangup", { method: "POST" });
+      } catch (e) {}
+    }
+
+    async function loadContacts() {
+      try {
+        const resp = await fetch("/api/contacts");
+        const contacts = await resp.json();
+        renderContacts(contacts);
+      } catch (e) {
+        console.error("Failed to load contacts:", e);
+      }
+    }
+
+    function renderContacts(contacts) {
+      const container = document.getElementById("contactsListContainer");
+      container.innerHTML = "";
+      const keys = Object.keys(contacts);
+      document.getElementById("contactsCountBadge").innerText = `${keys.length} Contact${keys.length === 1 ? '' : 's'}`;
+
+      if (keys.length === 0) {
+        container.innerHTML = `<div style="grid-column: 1/-1; color: var(--text-muted); font-size: 13px; text-align: center; padding: 12px;">No contacts saved yet. Add one above!</div>`;
+        return;
+      }
+
+      keys.forEach(k => {
+        const c = contacts[k];
+        const item = document.createElement("div");
+        item.className = "contact-item";
+        item.innerHTML = `
+          <div class="contact-info">
+            <span class="contact-name">👤 ${escapeHtml(c.name)}</span>
+            <span class="contact-number">${escapeHtml(c.number)}</span>
+          </div>
+          <div class="contact-actions">
+            <button class="btn-call-mini" onclick="dialContact('${escapeHtml(c.number)}')">
+              <span>📞 Dial</span>
+            </button>
+            <button class="btn-del-mini" onclick="deleteContact('${escapeHtml(k)}')" title="Delete contact">
+              <span>🗑️</span>
+            </button>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    async function addContact() {
+      const nameInput = document.getElementById("newContactName");
+      const numInput = document.getElementById("newContactNumber");
+      const name = nameInput.value.trim();
+      const number = numInput.value.trim();
+
+      if (!name || !number) {
+        alert("Please enter both Name and Phone Number");
+        return;
+      }
+
+      try {
+        const resp = await fetch("/api/contacts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name, number: number })
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          nameInput.value = "";
+          numInput.value = "";
+          renderContacts(data.contacts);
+          appendLog(`Contact saved: ${name} (${number})`, "success");
+        } else {
+          alert("Error: " + data.message);
+        }
+      } catch (e) {
+        alert("Failed to save contact: " + e);
+      }
+    }
+
+    async function deleteContact(key) {
+      if (!confirm(`Delete contact '${key}'?`)) return;
+      try {
+        const resp = await fetch(`/api/contacts/${encodeURIComponent(key)}`, {
+          method: "DELETE"
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          renderContacts(data.contacts);
+          appendLog(`Contact deleted: ${key}`, "normal");
+        }
+      } catch (e) {
+        alert("Failed to delete contact: " + e);
+      }
+    }
+
+    function dialContact(number) {
+      const input = document.getElementById("phoneInput");
+      input.value = number;
+      appendLog(`Contact selected: ${number}. Dialing now...`, "normal");
+      startCall(false);
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    window.onload = () => {
+      appendLog("System ready. Connected to local server.", "success");
+      checkJioStatus();
+      loadContacts();
+    };
+  </script>
+</body>
+</html>
