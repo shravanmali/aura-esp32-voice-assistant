@@ -4166,20 +4166,33 @@ def parse_call_intent(query: str) -> str | None:
 
 from esp32_call_bridge import bridge_instance as call_audio_bridge
 
+call_audio_chunk_buffer = bytearray()
+call_audio_packets_sent = 0
+
 def send_call_audio_to_esp32(pcm_chunk: bytes):
-    global client, loop
-    if client and is_connected() and loop and not loop.is_closed():
+    global client, loop, call_audio_chunk_buffer, call_audio_packets_sent
+    if not client or not is_connected() or not loop or loop.is_closed():
+        return
+    call_audio_chunk_buffer.extend(pcm_chunk)
+    while len(call_audio_chunk_buffer) >= 1024:
+        chunk = bytes(call_audio_chunk_buffer[:1024])
+        del call_audio_chunk_buffer[:1024]
         try:
-            loop.call_soon_threadsafe(client.send_voice_assistant_audio, pcm_chunk)
-        except Exception:
-            pass
+            loop.call_soon_threadsafe(client.send_voice_assistant_audio, chunk)
+            call_audio_packets_sent += 1
+            if call_audio_packets_sent % 100 == 0:
+                print(f"[CALL AUDIO DISPATCH]: Streamed {call_audio_packets_sent * 1024} bytes to ESP32 speaker.")
+        except Exception as e:
+            print(f"[CALL AUDIO SEND ERROR]: {e}")
 
 call_hangup_requested = False
 
 def monitor_active_call_session():
     """Watches the call state and keeps the pure ESP32 hardware audio pipeline active."""
-    global client, loop, active_audio_queue, call_hangup_requested
+    global client, loop, active_audio_queue, call_hangup_requested, call_audio_chunk_buffer, call_audio_packets_sent
     call_hangup_requested = False
+    call_audio_chunk_buffer.clear()
+    call_audio_packets_sent = 0
     print("[CALL MONITOR] Telecom session monitor started.")
     
     # 1. Wait until any in-progress TTS announcement finishes completely to prevent audio collision/stutter!
@@ -7300,6 +7313,8 @@ async def handle_start(conversation_id: str, flags: int, settings: VoiceAssistan
             client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_STT_START, None)
             client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": "Telecom Call"})
             client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, None)
+            # Prime speaker buffer immediately after session start so ESPHome I2S DAC activates
+            client.send_voice_assistant_audio(b'\x00' * 4096)
         except Exception as e:
             print(f"[CALL MIC/SPEAKER START ERROR]: {e}")
         return 0
