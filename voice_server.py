@@ -4200,9 +4200,10 @@ def monitor_active_call_session():
                 data = r.json()
                 state = data.get("state", "idle")
                 is_active = data.get("is_active", False)
-                # Allow a 6.0s initial buffer for MicroSIP to register & connect
+                # Call is only terminated if state has truly become 'ended' or reverted to 'idle' after initial dial grace period!
+                # As long as state is 'dialing', 'ringing', or 'connected', keep the pipeline active!
                 if (time.time() - dial_start_ts) > 6.0:
-                    if not is_active or state == "ended":
+                    if state == "ended" or (state == "idle" and not is_active):
                         print(f"[CALL MONITOR] Call ended (state={state}, is_active={is_active}).")
                         break
 
@@ -4223,11 +4224,13 @@ def monitor_active_call_session():
                                 client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_RUN_START, None)
                                 client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": "Telecom Call"})
                                 client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, None)
+                                # Prime ESPHome speaker buffer with 4096 bytes so ESPHome starts I2S playback without waiting
+                                client.send_voice_assistant_audio(b'\x00' * 4096)
                             except Exception as e:
                                 print(f"[CALL MONITOR ARM ERROR]: {e}")
                         loop.call_soon_threadsafe(_arm)
                         stream_opened = True
-                        print("[CALL MONITOR] ESP32 Speaker I2S pipeline armed and open!")
+                        print("[CALL MONITOR] ESP32 Speaker I2S pipeline armed and primed!")
                         try:
                             asyncio.run_coroutine_threadsafe(trigger_mic_start(), loop)
                         except Exception:

@@ -268,20 +268,12 @@ def is_microsip_process_alive():
 def monitor_microsip_call(proc=None):
     log_path = os.path.join(os.path.dirname(__file__), "microsip", "microsip_log.txt")
     last_pos = 0
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(0, os.SEEK_END)
-                last_pos = f.tell()
-        except Exception:
-            last_pos = 0
-
     call_start_ts = time.time()
     try:
         while CALL_STATE["is_active"]:
             time.sleep(0.35)
-            # 1. Verify microsip process liveness (with 4.0s initial grace period)
-            if (time.time() - call_start_ts) > 4.0:
+            # 1. Verify microsip process liveness (with 5.0s initial grace period)
+            if (time.time() - call_start_ts) > 5.0:
                 if not is_microsip_process_alive():
                     with state_lock:
                         CALL_STATE["state"] = "ended"
@@ -289,13 +281,13 @@ def monitor_microsip_call(proc=None):
                     add_log("[ENDED] MicroSIP process exited cleanly.", "normal")
                     return
 
-            # 2. Timeout for unanswered calls (60s)
-            if CALL_STATE["state"] in ("dialing", "ringing") and (time.time() - call_start_ts) > 60.0:
+            # 2. Timeout for unanswered calls (90s)
+            if CALL_STATE["state"] in ("dialing", "ringing") and (time.time() - call_start_ts) > 90.0:
                 with state_lock:
                     CALL_STATE["state"] = "ended"
                     CALL_STATE["is_active"] = False
                 cleanup_microsip_processes()
-                add_log("[TIMEOUT] Call not answered within 60 seconds.", "error")
+                add_log("[TIMEOUT] Call not answered within 90 seconds.", "error")
                 return
 
             if not os.path.exists(log_path):
@@ -320,23 +312,25 @@ def monitor_microsip_call(proc=None):
                 with state_lock:
                     CALL_STATE["state"] = "ringing"
 
-            # Event 2: True Disconnect Triggers (PJSIP DISCONNCTD, SIP BYE, Cancel/Decline/Busy)
-            # NOTE: NEVER trigger on "Stream destroyed" or "Closing sound device", as those
-            # are normal internal PJSIP transitions when switching early ringback audio to active call media!
-            if "CONFIRMED" not in new_data:
-                disconnect_keywords = [
-                    "DISCONNCTD", "DISCONNECTED",
-                    "Request msg BYE", "Response msg 200/BYE",
-                    "487 Request Terminated", "486 Busy",
-                    "603 Decline", "408 Request Timeout", "503 Service",
-                    "Call terminated"
-                ]
+            # Event 2: True Disconnect Triggers
+            cur_state = CALL_STATE["state"]
+            if cur_state == "connected":
+                connected_disconnect = ["DISCONNCTD", "DISCONNECTED", "Request msg BYE", "Response msg 200/BYE", "Call terminated"]
                 for line in new_data.splitlines():
-                    if any(k in line for k in disconnect_keywords):
+                    if any(k in line for k in connected_disconnect):
                         with state_lock:
                             CALL_STATE["state"] = "ended"
                             CALL_STATE["is_active"] = False
                         add_log(f"[ENDED] Call disconnected: {line.strip()}", "normal")
+                        return
+            elif cur_state in ("dialing", "ringing"):
+                ringing_reject = ["487 Request Terminated", "486 Busy", "603 Decline", "408 Request Timeout", "503 Service", "Server Internal Error"]
+                for line in new_data.splitlines():
+                    if any(k in line for k in ringing_reject):
+                        with state_lock:
+                            CALL_STATE["state"] = "ended"
+                            CALL_STATE["is_active"] = False
+                        add_log(f"[ENDED] Remote declined/busy: {line.strip()}", "normal")
                         return
     except Exception as e:
         add_log(f"[MONITOR ERROR] {e}", "error")
@@ -366,6 +360,14 @@ def run_tls_sip_dial(dest_number, is_video=False):
     # Kill any stale or ghost microsip instances to prevent multiple ringtones
     cleanup_microsip_processes()
     time.sleep(0.3)
+
+    log_path = os.path.join(os.path.dirname(__file__), "microsip", "microsip_log.txt")
+    try:
+        if os.path.exists(log_path):
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.truncate(0)
+    except Exception:
+        pass
 
     cfg = load_jio_config()
     if not cfg:
