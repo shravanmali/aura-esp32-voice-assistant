@@ -4200,9 +4200,10 @@ def monitor_active_call_session():
                 data = r.json()
                 state = data.get("state", "idle")
                 is_active = data.get("is_active", False)
-                # Allow a 4.5s initial buffer for MicroSIP to initialize and connect
-                if (time.time() - dial_start_ts) > 4.5:
-                    if not is_active or state in ("ended", "idle"):
+                # Allow a 6.0s initial buffer for MicroSIP to register & connect
+                if (time.time() - dial_start_ts) > 6.0:
+                    if not is_active or state == "ended":
+                        print(f"[CALL MONITOR] Call ended (state={state}, is_active={is_active}).")
                         break
 
                 if state in ("dialing", "ringing") and not call_hangup_requested:
@@ -4233,8 +4234,6 @@ def monitor_active_call_session():
                             pass
                     if not call_audio_bridge.is_active and not call_hangup_requested:
                         call_audio_bridge.start(send_call_audio_to_esp32)
-                elif state in ("ended", "idle"):
-                    break
             except Exception:
                 pass
     finally:
@@ -4481,18 +4480,19 @@ def handle_hangup_intent(lang: str = "en") -> str:
     set_aura_led("hangup")
     call_audio_bridge.stop()
     
-    # 1. Immediately send /hangupall directly to MicroSIP for instant real-life hangup!
+    # Force kill MicroSIP immediately so call terminates on cellular network in real life
     try:
+        import subprocess
         microsip_exe = r"c:\Users\VICTUS\OneDrive\Desktop\Pappu Pelu\ESP 32\v0\calling_test\microsip\microsip.exe"
         if os.path.exists(microsip_exe):
-            import subprocess
-            subprocess.run([microsip_exe, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+            subprocess.run([microsip_exe, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
     except Exception as e:
         print(f"[MICROSIP HANGUP ERROR]: {e}")
 
     try:
         import requests
-        requests.post("http://localhost:5050/api/hangup", timeout=2.0)
+        requests.post("http://localhost:5050/api/hangup", timeout=1.5)
     except Exception as e:
         print(f"[HANGUP ERROR]: {e}")
         

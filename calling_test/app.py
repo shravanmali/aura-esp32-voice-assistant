@@ -257,6 +257,14 @@ def pop_microsip_window():
     except Exception:
         pass
 
+def is_microsip_process_alive():
+    try:
+        import subprocess
+        out = subprocess.check_output(["tasklist", "/FI", "IMAGENAME eq microsip.exe", "/NH"], stderr=subprocess.DEVNULL)
+        return b"microsip.exe" in out.lower()
+    except Exception:
+        return True
+
 def monitor_microsip_call(proc=None):
     log_path = os.path.join(os.path.dirname(__file__), "microsip", "microsip_log.txt")
     last_pos = 0
@@ -272,9 +280,9 @@ def monitor_microsip_call(proc=None):
     try:
         while CALL_STATE["is_active"]:
             time.sleep(0.35)
-            # 1. Verify microsip child process liveness (with 2.5s grace period)
-            if proc is not None and (time.time() - call_start_ts) > 2.5:
-                if proc.poll() is not None:
+            # 1. Verify microsip process liveness (with 4.0s initial grace period)
+            if (time.time() - call_start_ts) > 4.0:
+                if not is_microsip_process_alive():
                     with state_lock:
                         CALL_STATE["state"] = "ended"
                         CALL_STATE["is_active"] = False
@@ -341,15 +349,17 @@ def monitor_microsip_call(proc=None):
 def cleanup_microsip_processes():
     try:
         import subprocess
-        # Gracefully send SIP BYE / CANCEL to telecom network so remote phone hangs up in real life!
         if os.path.exists(MICROSIP_EXE):
-            subprocess.run([MICROSIP_EXE, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
-            time.sleep(0.3)
-            subprocess.run([MICROSIP_EXE, "/exit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
-            time.sleep(0.2)
-        subprocess.run(["taskkill", "/F", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([MICROSIP_EXE, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+            subprocess.run([MICROSIP_EXE, "/exit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
     except Exception:
         pass
+    try:
+        import subprocess
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
+    except Exception:
+        pass
+    time.sleep(0.3)
 
 def run_tls_sip_dial(dest_number, is_video=False):
     # Kill any stale or ghost microsip instances to prevent multiple ringtones
@@ -452,14 +462,8 @@ def hangup():
         CALL_STATE["is_active"] = False
 
     cleanup_microsip_processes()
-    try:
-        import urllib.request
-        req = urllib.request.Request("http://localhost:8080/api/call/hangup", data=b"{}", headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=1.5)
-    except Exception:
-        pass
-
     add_log("Call terminated / Hang up.", "error")
+    return jsonify({"status": "ok", "state": "ended"})
     return jsonify({"status": "ok"})
 
 @app.route("/api/call/toggle_mute", methods=["POST"])

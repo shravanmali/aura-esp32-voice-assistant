@@ -462,17 +462,11 @@ class ESP32CallAudioBridge:
                 if instant_rms > 90.0:
                     self.last_caller_audio_time = now
 
-                # Forward 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
-                # If caller speech or ringtone is present (> 35 RMS): send real audio immediately (< 20ms latency).
-                # If dead silent (< 35 RMS): pace pure zero-bytes keepalive at 70ms to prevent driver underrun without buzz/hiss!
+                # Forward continuous 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
+                # Always forward live audio frame directly to keep the I2S DAC pipeline primed and perfectly smooth.
                 if self.send_to_esp32_fn:
-                    if self.caller_speaker_rms > 35.0:
-                        pcm_out = mono_16k.astype(np.int16).tobytes()
-                        self.send_to_esp32_fn(pcm_out)
-                        last_sent_time = now
-                    elif (now - last_sent_time) > 0.070:
-                        self.send_to_esp32_fn(silence_keepalive)
-                        last_sent_time = now
+                    pcm_out = mono_16k.astype(np.int16).tobytes()
+                    self.send_to_esp32_fn(pcm_out)
 
             in_stream.stop_stream()
             in_stream.close()
