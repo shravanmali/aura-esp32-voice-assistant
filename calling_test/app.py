@@ -303,24 +303,33 @@ def monitor_microsip_call(proc=None):
             if not new_data:
                 continue
                 
-            for line in new_data.splitlines():
-                if "180 Ringing" in line or "183 Session Progress" in line:
-                    with state_lock:
-                        CALL_STATE["state"] = "ringing"
-                elif "CONFIRMED" in line:
-                    with state_lock:
-                        CALL_STATE["state"] = "connected"
-                    add_log("[CONNECTED] Call answered! Two-way audio live.", "success")
-                elif any(k in line for k in [
-                    "DISCONNECTED", "Stream destroyed", "Closing sound device",
-                    "hangup.wav", "Call terminated", "487 Request Terminated",
-                    "486 Busy", "603 Decline", "408 Request Timeout", "503 Service"
-                ]):
-                    with state_lock:
-                        CALL_STATE["state"] = "ended"
-                        CALL_STATE["is_active"] = False
-                    add_log("[ENDED] Call ended / Disconnected.", "normal")
-                    return
+            # Event 1: Connected / Answered (CONFIRMED)
+            if "CONFIRMED" in new_data:
+                with state_lock:
+                    CALL_STATE["state"] = "connected"
+                add_log("[CONNECTED] Call answered! Two-way audio live.", "success")
+            elif CALL_STATE["state"] == "dialing" and ("180 Ringing" in new_data or "183 Session Progress" in new_data):
+                with state_lock:
+                    CALL_STATE["state"] = "ringing"
+
+            # Event 2: True Disconnect Triggers (PJSIP DISCONNCTD, SIP BYE, Cancel/Decline/Busy)
+            # NOTE: NEVER trigger on "Stream destroyed" or "Closing sound device", as those
+            # are normal internal PJSIP transitions when switching early ringback audio to active call media!
+            if "CONFIRMED" not in new_data:
+                disconnect_keywords = [
+                    "DISCONNCTD", "DISCONNECTED",
+                    "Request msg BYE", "Response msg 200/BYE",
+                    "487 Request Terminated", "486 Busy",
+                    "603 Decline", "408 Request Timeout", "503 Service",
+                    "Call terminated"
+                ]
+                for line in new_data.splitlines():
+                    if any(k in line for k in disconnect_keywords):
+                        with state_lock:
+                            CALL_STATE["state"] = "ended"
+                            CALL_STATE["is_active"] = False
+                        add_log(f"[ENDED] Call disconnected: {line.strip()}", "normal")
+                        return
     except Exception as e:
         add_log(f"[MONITOR ERROR] {e}", "error")
     finally:

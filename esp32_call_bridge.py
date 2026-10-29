@@ -345,22 +345,22 @@ class ESP32CallAudioBridge:
                 mic_rms = float(np.sqrt(np.mean(voice_eq ** 2)))
                 now_ts = time.time()
                 time_since_caller = now_ts - self.last_caller_audio_time
-                speaker_active = (time_since_caller < 0.55)
+                speaker_active = (self.caller_speaker_rms > 90.0) and (time_since_caller < 0.40)
 
                 if speaker_active:
                     # Inbound speaker in the room is physically sounding caller's voice!
-                    # Suppress speaker acoustic feedback completely so caller hears ZERO echo of themselves.
-                    if mic_rms < 1200.0:
-                        target_gain = 0.0
+                    # Attenuate acoustic feedback so caller does not hear echo
+                    if mic_rms < 400.0:
+                        target_gain = 0.05
                     else:
-                        # Double-talk: room user is speaking forcefully over the speaker
-                        target_gain = 0.85
+                        # Double-talk: room user is speaking over the speaker
+                        target_gain = 0.95
                 else:
-                    # Speaker is completely silent. Caller is listening.
-                    if mic_rms < 90.0:
+                    # Speaker is quiet. Caller is listening.
+                    if mic_rms < 70.0:
                         target_gain = 0.05  # Background room noise floor gate
                     else:
-                        target_gain = 1.80  # Loud, full-bodied speech boost (+5.1dB)
+                        target_gain = 1.85  # Loud, full-bodied speech boost (+5.3dB)
 
                 # Smooth gain transition (20ms time constant) to prevent audible clicks/pops
                 self.current_out_gain = 0.75 * self.current_out_gain + 0.25 * target_gain
@@ -459,7 +459,7 @@ class ESP32CallAudioBridge:
                 self.caller_speaker_rms = 0.70 * self.caller_speaker_rms + 0.30 * instant_rms
 
                 # Whenever caller speech or ringtone is present, mark the acoustic speaker active timestamp
-                if instant_rms > 35.0:
+                if instant_rms > 90.0:
                     self.last_caller_audio_time = now
 
                 # Forward 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:

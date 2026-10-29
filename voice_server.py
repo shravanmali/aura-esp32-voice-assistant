@@ -4200,8 +4200,8 @@ def monitor_active_call_session():
                 data = r.json()
                 state = data.get("state", "idle")
                 is_active = data.get("is_active", False)
-                # Allow a 2.5s initial buffer for MicroSIP to initialize and connect
-                if (time.time() - dial_start_ts) > 2.5:
+                # Allow a 4.5s initial buffer for MicroSIP to initialize and connect
+                if (time.time() - dial_start_ts) > 4.5:
                     if not is_active or state in ("ended", "idle"):
                         break
 
@@ -4347,9 +4347,10 @@ def is_hangup_command(query: str) -> bool:
         return False
     q = query.lower().strip()
     hangup_keywords = [
-        "hang up", "hang the call", "cut the call", "cut call", "end call", "end the call",
-        "disconnect call", "disconnect", "stop call", "phone kato", "call kato", "call cut",
-        "call end", "call disconnect", "hangup", "disconnect the call", "phone cut", "call band", "काटो", "काट", "कट करा", "कट કર", "કાપી નાખ"
+        "hang up", "hangup", "hang the call", "cut the call", "cut call", "end call", "end the call",
+        "disconnect call", "disconnect", "stop call", "stop calling", "cancel call", "phone kato",
+        "call kato", "call cut", "call end", "call disconnect", "disconnect the call", "phone cut",
+        "call band", "band karo", "kato", "काटो", "काट", "कट करा", "कट कर", "કાપી નાખ", "बंद करो", "कॉल काटो", "फोन काटो"
     ]
     return any(w in q for w in hangup_keywords)
 
@@ -4454,7 +4455,7 @@ def _evaluate_in_call_command(pcm_data: bytes):
         print(f"[IN-CALL SPEECH MONITORED]: '{text}'")
         
         # 1. Check Hangup
-        if any(w in text for w in ["hang up", "end call", "cut call", "cut the call", "disconnect", "call end", "kato", "काटो", "कट"]):
+        if any(w in text for w in ["hang up", "hangup", "end call", "cut call", "cut the call", "disconnect", "call end", "stop call", "cancel", "kato", "phone kato", "काटो", "कट", "काट", "बंद"]):
             print("[IN-CALL ACTION]: Hangup triggered via voice command!")
             handle_hangup_intent("en")
             return
