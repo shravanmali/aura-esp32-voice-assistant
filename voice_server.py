@@ -4178,10 +4178,8 @@ call_hangup_requested = False
 
 def monitor_active_call_session():
     """Watches the call state and keeps the pure ESP32 hardware audio pipeline active."""
-    global client, loop, active_audio_queue, call_hangup_requested, call_audio_chunk_buffer, call_audio_packets_sent
+    global client, loop, active_audio_queue, call_hangup_requested
     call_hangup_requested = False
-    call_audio_chunk_buffer.clear()
-    call_audio_packets_sent = 0
     print("[CALL MONITOR] Telecom session monitor started.")
     
     # 1. Wait until any in-progress TTS announcement finishes completely to prevent audio collision/stutter!
