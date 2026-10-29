@@ -289,13 +289,13 @@ def monitor_microsip_call(proc=None):
                     add_log("[ENDED] MicroSIP process exited cleanly.", "normal")
                     return
 
-            # 2. Timeout for unanswered calls (45s)
-            if CALL_STATE["state"] in ("dialing", "ringing") and (time.time() - call_start_ts) > 45.0:
+            # 2. Timeout for unanswered calls (60s)
+            if CALL_STATE["state"] in ("dialing", "ringing") and (time.time() - call_start_ts) > 60.0:
                 with state_lock:
                     CALL_STATE["state"] = "ended"
                     CALL_STATE["is_active"] = False
                 cleanup_microsip_processes()
-                add_log("[TIMEOUT] Call not answered within 45 seconds.", "error")
+                add_log("[TIMEOUT] Call not answered within 60 seconds.", "error")
                 return
 
             if not os.path.exists(log_path):
@@ -311,8 +311,8 @@ def monitor_microsip_call(proc=None):
             if not new_data:
                 continue
                 
-            # Event 1: Connected / Answered (CONFIRMED)
-            if "CONFIRMED" in new_data:
+            # Event 1: Connected / Answered (CONFIRMED / sendrecv / Jitter buffer)
+            if ("CONFIRMED" in new_data or "sendrecv" in new_data or "Jitter buffer" in new_data):
                 with state_lock:
                     CALL_STATE["state"] = "connected"
                 add_log("[CONNECTED] Call answered! Two-way audio live.", "success")
@@ -351,6 +351,7 @@ def cleanup_microsip_processes():
         import subprocess
         if os.path.exists(MICROSIP_EXE):
             subprocess.run([MICROSIP_EXE, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+            time.sleep(0.8)  # Allow SIP BYE packet to be transmitted over TLS to Jio Fiber exchange!
             subprocess.run([MICROSIP_EXE, "/exit"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
     except Exception:
         pass

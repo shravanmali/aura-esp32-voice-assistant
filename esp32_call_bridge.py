@@ -80,20 +80,29 @@ class IAudioEndpointVolume(IUnknown):
     ]
 
 def silence_laptop_physical_speakers():
-    """Uses Windows Core Audio API to mute OMEN and Realtek physical speakers so zero acoustic sound leaks."""
+    """
+    Configures Windows Core Audio API endpoints:
+    1. MUTES physical laptop speaker (Realtek) to prevent any acoustic leakage in the room.
+    2. UNMUTES and sets 100% volume on OMEN and VB-CABLE endpoints so WASAPI digital loopback and mic capture are 100% bit-perfect.
+    """
     try:
         enumerator = comtypes.CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, comtypes.CLSCTX_INPROC_SERVER)
-        collection = enumerator.EnumAudioEndpoints(0, 1) # eRender, DEVICE_STATE_ACTIVE
-        for i in range(collection.GetCount()):
-            dev = collection.Item(i)
-            props = dev.OpenPropertyStore(0)
-            pv = props.GetValue(PKEY_Device_FriendlyName)
-            name = str(pv.pwszVal)
-            if 'OMEN' in name.upper() or 'REALTEK' in name.upper():
+        for flow in [0, 1]:  # 0: eRender, 1: eCapture
+            collection = enumerator.EnumAudioEndpoints(flow, 1)  # DEVICE_STATE_ACTIVE
+            for i in range(collection.GetCount()):
+                dev = collection.Item(i)
+                props = dev.OpenPropertyStore(0)
+                pv = props.GetValue(PKEY_Device_FriendlyName)
+                name = str(pv.pwszVal)
                 pEndpoint = dev.Activate(IID_IAudioEndpointVolume, comtypes.CLSCTX_INPROC_SERVER, None)
                 vol = pEndpoint.QueryInterface(IAudioEndpointVolume)
-                vol.SetMute(True, None)
-                print(f"[AUDIO BRIDGE HARDWARE SILENCE]: Muted physical speaker endpoint '{name}' (0.0 dB acoustic output).")
+                if 'REALTEK' in name.upper():
+                    vol.SetMute(True, None)
+                    print(f"[AUDIO BRIDGE HARDWARE SILENCE]: Muted physical speaker endpoint '{name}' (0.0 dB acoustic output).")
+                elif 'OMEN' in name.upper() or 'CABLE' in name.upper():
+                    vol.SetMute(False, None)
+                    vol.SetMasterVolumeLevelScalar(1.0, None)
+                    print(f"[AUDIO BRIDGE BIT-PERFECT]: Unmuted virtual telecom endpoint '{name}' at 100% volume.")
     except Exception as e:
         print(f"[AUDIO BRIDGE SILENCE NOTICE]: {e}")
 
@@ -341,38 +350,21 @@ class ESP32CallAudioBridge:
                 # 2. 3.2kHz Vocal Presence Equalization (+4.5dB boost for phone clarity)
                 voice_eq, self.eq_zi = signal.lfilter(self.b_eq, self.a_eq, filtered_hp, zi=self.eq_zi)
 
-                # 3. Intelligent Hardware-Latency-Aware Acoustic Echo Suppression (AES)
+                # 3. Dynamic Gain & Vocal Presence (MicroSIP has native Speex AEC enabled)
                 mic_rms = float(np.sqrt(np.mean(voice_eq ** 2)))
                 now_ts = time.time()
                 time_since_caller = now_ts - self.last_caller_audio_time
-                speaker_active = (self.caller_speaker_rms > 90.0) and (time_since_caller < 0.40)
+                speaker_active = (self.caller_speaker_rms > 120.0) and (time_since_caller < 0.35)
 
                 if speaker_active:
-                    # Inbound speaker in the room is physically sounding caller's voice!
-                    # Attenuate acoustic feedback so caller does not hear echo
-                    if mic_rms < 400.0:
-                        target_gain = 0.05
-                    else:
-                        # Double-talk: room user is speaking over the speaker
-                        target_gain = 0.95
+                    # When caller is speaking loudly through the ESP32 speaker, apply mild echo damping
+                    target_gain = 0.50 if mic_rms < 300.0 else 1.20
                 else:
-                    # Speaker is quiet. Caller is listening.
-                    if mic_rms < 70.0:
-                        target_gain = 0.05  # Background room noise floor gate
-                    else:
-                        target_gain = 1.85  # Loud, full-bodied speech boost (+5.3dB)
+                    # Full duplex speech transmission: loud, crisp, and clear
+                    target_gain = 1.80
 
                 # Smooth gain transition (20ms time constant) to prevent audible clicks/pops
-                self.current_out_gain = 0.75 * self.current_out_gain + 0.25 * target_gain
-
-                if self.current_out_gain < 0.01:
-                    silence_frame = b'\x00' * (out_samples_target * 4)
-                    try:
-                        self.outbound_stream.write(silence_frame)
-                    except Exception:
-                        pass
-                    continue
-
+                self.current_out_gain = 0.70 * self.current_out_gain + 0.30 * target_gain
                 boosted = voice_eq * self.current_out_gain
 
                 # 4. Anti-clipping soft tanh compression above 26000
@@ -465,7 +457,8 @@ class ESP32CallAudioBridge:
                 # Forward continuous 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
                 # Always forward live audio frame directly to keep the I2S DAC pipeline primed and perfectly smooth.
                 if self.send_to_esp32_fn:
-                    pcm_out = mono_16k.astype(np.int16).tobytes()
+                    boosted_caller = np.clip(mono_16k * 1.4, -32767.0, 32767.0)
+                    pcm_out = boosted_caller.astype(np.int16).tobytes()
                     self.send_to_esp32_fn(pcm_out)
 
             in_stream.stop_stream()

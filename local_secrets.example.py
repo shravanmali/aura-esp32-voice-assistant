@@ -7,3 +7,4 @@ GROQ_KEYS = [
 CARTESIA_KEYS = [
     "sk_car_your_cartesia_api_key_here",
 ]
+

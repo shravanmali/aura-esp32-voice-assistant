@@ -4480,13 +4480,12 @@ def handle_hangup_intent(lang: str = "en") -> str:
     set_aura_led("hangup")
     call_audio_bridge.stop()
     
-    # Force kill MicroSIP immediately so call terminates on cellular network in real life
+    # Signal MicroSIP to hang up cleanly so SIP BYE is transmitted over TLS to Jio
     try:
         import subprocess
         microsip_exe = r"c:\Users\VICTUS\OneDrive\Desktop\Pappu Pelu\ESP 32\v0\calling_test\microsip\microsip.exe"
         if os.path.exists(microsip_exe):
             subprocess.run([microsip_exe, "/hangupall"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-        subprocess.run(["taskkill", "/F", "/T", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
     except Exception as e:
         print(f"[MICROSIP HANGUP ERROR]: {e}")
 
@@ -4495,6 +4494,14 @@ def handle_hangup_intent(lang: str = "en") -> str:
         requests.post("http://localhost:5050/api/hangup", timeout=1.5)
     except Exception as e:
         print(f"[HANGUP ERROR]: {e}")
+
+    # Give MicroSIP 800ms to send SIP BYE to Jio Fiber network before cleaning up
+    time.sleep(0.8)
+    try:
+        import subprocess
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "microsip.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.5)
+    except Exception:
+        pass
         
     msg_map = {
         "hi": "कॉल समाप्त कर दिया गया है।",

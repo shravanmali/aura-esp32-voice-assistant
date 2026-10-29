@@ -147,3 +147,4 @@ python voice_server.py
 ## 🛡️ License
 
 MIT License. Designed and crafted with ❤️ for high-performance home automation and voice computing.
+
