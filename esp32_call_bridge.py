@@ -464,19 +464,21 @@ class ESP32CallAudioBridge:
                 instant_rms = float(np.sqrt(np.mean(mono_16k ** 2)))
                 self.caller_speaker_rms = 0.70 * self.caller_speaker_rms + 0.30 * instant_rms
 
-                # Whenever caller speech or ringtone is present, mark the acoustic speaker active timestamp
-                if instant_rms > 35.0:
+                # Hangover tracking: Keep forwarding for 250ms after speech to preserve word endings & soft consonants
+                if instant_rms > 20.0:
                     self.last_caller_audio_time = now
 
+                speech_active = (instant_rms > 20.0) or ((now - self.last_caller_audio_time) < 0.250)
+
                 # Forward 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
-                # Always forward live caller frames with vocal boost
                 if self.send_to_esp32_fn:
-                    if instant_rms > 35.0:
-                        boosted_caller = np.clip(mono_16k * 1.5, -32767.0, 32767.0)
+                    if speech_active:
+                        boosted_caller = np.clip(mono_16k * 1.6, -32767.0, 32767.0)
                         pcm_out = boosted_caller.astype(np.int16).tobytes()
                         self.send_to_esp32_fn(pcm_out)
                         last_sent_time = now
-                    elif (now - last_sent_time) > 0.050:
+                    elif (now - last_sent_time) > 2.5:
+                        # Gentle keepalive once every 2.5s (refreshes 5s speaker timeout without buffer congestion)
                         self.send_to_esp32_fn(silence_keepalive)
                         last_sent_time = now
 

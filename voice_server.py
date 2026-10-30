@@ -4166,11 +4166,16 @@ def parse_call_intent(query: str) -> str | None:
 
 from esp32_call_bridge import bridge_instance as call_audio_bridge
 
+call_audio_packets_sent = 0
+
 def send_call_audio_to_esp32(pcm_chunk: bytes):
-    global client, loop
+    global client, loop, call_audio_packets_sent
     if client and is_connected() and loop and not loop.is_closed():
         try:
             loop.call_soon_threadsafe(client.send_voice_assistant_audio, pcm_chunk)
+            call_audio_packets_sent += 1
+            if call_audio_packets_sent % 50 == 1:
+                print(f"[CALL AUDIO OUTBOUND]: Streaming caller voice to ESP32 speaker (packet #{call_audio_packets_sent}, size={len(pcm_chunk)}b)")
         except Exception:
             pass
 
