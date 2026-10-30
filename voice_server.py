@@ -1528,8 +1528,14 @@ def resolve_contrastive_clauses(raw_fact: str) -> str:
     return raw_fact.strip()
 
 def extract_memory_slot_key(text: str) -> str | None:
-    """Identifies the semantic topic/slot to intelligently overwrite conflicting facts (e.g. favorite color)."""
+    """Identifies the semantic topic/slot to intelligently overwrite conflicting facts (e.g. favorite color, registered platform)."""
     t_low = text.lower()
+    if any(k in t_low for k in ["registered", "register", "platform", "project"]):
+        return "registered"
+    if any(k in t_low for k in ["your name is", "my name is", "user's name", "call me"]):
+        return "name"
+    if any(k in t_low for k in ["age is", "years old"]):
+        return "age"
     # Check common slots
     m = re.search(r"\b(favorite\s+[a-z]+|most\s+favorite\s+[a-z]+|dog(?:'s)?\s+name|pet(?:'s)?\s+name|cat(?:'s)?\s+name|sister(?:'s)?\s+name|brother(?:'s)?\s+name|mother(?:'s)?\s+name|father(?:'s)?\s+name|birthday|hobby|job|college|school|car|friend|best\s+friend)\b", t_low)
     if m:
@@ -1543,6 +1549,12 @@ def add_user_memory(raw_fact: str, lang: str = "en") -> str:
     raw_fact = raw_fact.strip()
     if not raw_fact:
         return ""
+        
+    # Prevent questions from being saved as memories!
+    if raw_fact.endswith('?') or any(raw_fact.lower().startswith(q) for q in ['where', 'what', 'who', 'when', 'why', 'how', 'do you', 'can you', 'is ', 'are ', 'did ']):
+        print(f"[MEMORY REJECTED]: Query was a question, not a fact: '{raw_fact}'")
+        return ""
+
     if "memories" not in memory_data:
         memory_data["memories"] = []
 
@@ -4621,12 +4633,134 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
         yield from yield_fastpath_clauses(mute_ack, det_lang or "en", is_followup=False)
         return
 
-    # --- FAST-PATH 0C: RESPONSIVE USER MEMORY (Remember, Recall, Forget, Wipe) ---
+    # --- FAST-PATH 0C: RESPONSIVE USER MEMORY (Wipe, Register, Name, Recall, Remember, Forget) ---
+    is_wipe_all = bool(re.search(
+        r'\b(?:delete|clear|wipe|erase|reset|remove)\s+(?:all\s+)?(?:your\s+|my\s+|the\s+)?memor(?:y|ies)\b|\bforget\s+everything\b|\breset\s+(?:all\s+)?memory\b',
+        lower_uq
+    )) or any(k in lower_uq for k in [
+        'clear all memory', 'clear memory', 'wipe your memory', 'delete all memories',
+        'delete all your memory', 'delete your memory', 'delete memory', 'wipe memory',
+        'forget everything', 'delete this memory from your mind', 'सारी मेमोरी डिलीट',
+        'सर्व मेमरी साफ', 'બધી મેમરી સાફ', 'બધું ભૂલી જાઓ', 'मेमोरी साफ', 'मेमोरी डिलीट'
+    ])
+    if is_wipe_all:
+        wipe_all_memories()
+        ack = {
+            "hi": "सारी मेमोरी साफ कर दी गई है! मेरा दिमाग अब बिल्कुल नया और खाली है।",
+            "mr": "सर्व मेमरी पूर्णपणे साफ केली आहे! माझे मन आता एकदम फ्रेश आहे.",
+            "gu": "બધી મેમરી સાફ કરી દીધી છે! હવે મારી મેમરી એકદમ નવી છે.",
+            "en": "All your memories have been wiped clean! My memory is now completely fresh."
+        }.get(det_lang, "All your memories have been wiped clean! My memory is now completely fresh.")
+        yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+        return
+
+    # Registration statements (e.g. "I have registered you on Star Dance platform", "I registered you as an assistant on transport")
+    is_registration = re.search(r'\b(?:i\s+(?:have\s+)?registered\s+you|registered\s+you\s+(?:as|on|at|in)|you\s+are\s+registered\s+(?:on|in|at))\s+(?:on\s+|in\s+|at\s+|as\s+)?([^.]+)', user_query, re.IGNORECASE)
+    if is_registration:
+        raw_platform = is_registration.group(1).strip()
+        # Extract name if included e.g. "... and my name is Shravan"
+        name_sub = re.search(r'\b(?:and\s+)?(?:my\s+name\s+is|i\s+am|mera\s+naam\s+hai|mera\s+naam)\s+([A-Za-z]+)\b', raw_platform, re.IGNORECASE)
+        if name_sub:
+            cand_name = name_sub.group(1).title()
+            if cand_name.lower() not in ['a', 'an', 'the', 'registered', 'register', 'alexa']:
+                memory_data["user_name"] = cand_name
+                print(f"[USER NAME UPDATED]: '{cand_name}'")
+        clean_platform = re.split(r'\b(?:and\s+my\s+name|and\s+i\s+am|aur\s+mera\s+naam)\b', raw_platform, flags=re.IGNORECASE)[0].strip()
+        clean_platform = re.sub(r'^[,\s!.-]+|[,\s!.-]+$', '', clean_platform)
+        saved_fact = f"You registered me on {clean_platform}."
+        
+        # Overwrite previous registration notes & memories
+        memory_data["memories"] = [m for m in memory_data.get("memories", []) if "registered" not in m.lower()]
+        memory_data["notes"] = [n for n in memory_data.get("notes", []) if "registered" not in n.lower()]
+        memory_data["memories"].append(saved_fact)
+        save_memory(memory_data)
+        
+        user_pfx = f", {memory_data['user_name']}" if memory_data.get("user_name") else ""
+        ack = {
+            "hi": f"समझ गई{user_pfx}! मैंने अपडेट कर लिया है कि आपने मुझे {clean_platform} पर रजिस्टर किया है।",
+            "mr": f"लक्षात आले{user_pfx}! मी अपडेट केले आहे की तुम्ही मला {clean_platform} वर रजिस्टर केले आहे.",
+            "gu": f"બરાબર{user_pfx}! મેં અપડેટ કરી લીધું છે કે તમે મને {clean_platform} પર રજીસ્ટર કર્યું છે.",
+            "en": f"Got it{user_pfx}! I have updated my memory that you registered me on {clean_platform}."
+        }.get(det_lang, f"Got it{user_pfx}! I have updated my memory that you registered me on {clean_platform}.")
+        yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+        return
+
+    # Inquiries about where registered (e.g. "Where did I register you?", "Do you remember where I registered you?")
+    is_ask_registration = any(k in lower_uq for k in [
+        'where did i register you', 'where did you register', 'where did you registered you',
+        'where you registered you', 'where have i registered you', 'where i registered you',
+        'where do you remember where i registered you', 'do you remember where i registered you',
+        'do you remember where i had register you', 'do you remember where i have registered you',
+        'where did i registered you', 'where am i registered', 'where did i register',
+        'कहाँ रजिस्टर किया', 'कुठे रजिस्टर केले', 'ક્યાં રજીસ્ટર કર્યું'
+    ])
+    if is_ask_registration:
+        reg_facts = [m for m in memory_data.get("memories", []) + memory_data.get("notes", []) if "registered" in m.lower()]
+        if reg_facts:
+            fact_str = reg_facts[-1].rstrip('.') + "."
+            if fact_str.lower().startswith("you registered me"):
+                ans = fact_str
+            else:
+                ans = f"You registered me on {fact_str}"
+            yield from yield_fastpath_clauses(ans, det_lang or "en", is_followup=False)
+            return
+        else:
+            ack = {
+                "hi": "आपने मुझे अभी तक नहीं बताया कि आपने मुझे कहाँ रजिस्टर किया है! आप मुझे कहाँ रजिस्टर कर रहे हैं?",
+                "mr": "तुम्ही मला अजून सांगितले नाही की तुम्ही मला कुठे रजिस्टर केले आहे!",
+                "gu": "તમે મને હજી સુધી નથી કહ્યું કે તમે મને ક્યાં રજીસ્ટર કર્યું છે!",
+                "en": "You haven't told me where you registered me yet! Where did you register me?"
+            }.get(det_lang, "You haven't told me where you registered me yet! Where did you register me?")
+            yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+            return
+
+    # Name statement (e.g. "My name is Rajesh", "I am Rajesh", "Call me Rajesh", "Change my name to Rajesh")
+    is_name_statement = re.search(r'^(?:alexa\s+)?(?:my\s+name\s+is|i\s+am|call\s+me|change\s+my\s+name\s+to|update\s+my\s+name\s+to|mera\s+naam\s+hai|mera\s+naam|maaza\s+naav)\s+([A-Za-z]+)\b', user_query, re.IGNORECASE)
+    if is_name_statement and not any(k in lower_uq for k in ['registered', 'remember', 'timer', 'alarm', 'volume']):
+        cand_name = is_name_statement.group(1).title()
+        if cand_name.lower() not in ['a', 'an', 'the', 'alexa', 'ready', 'listening', 'here', 'back']:
+            memory_data["user_name"] = cand_name
+            memory_data["notes"] = [n for n in memory_data.get("notes", []) if "name is" not in n.lower()]
+            save_memory(memory_data)
+            ack = {
+                "hi": f"नमस्ते {cand_name}! मैंने याद रख लिया है कि आपका नाम {cand_name} है।",
+                "mr": f"नमस्कार {cand_name}! मी लक्षात ठेवले आहे की तुमचे नाव {cand_name} आहे.",
+                "gu": f"નમસ્તે {cand_name}! મેં યાદ રાખી લીધું છે કે તમારું નામ {cand_name} છે.",
+                "en": f"Hello {cand_name}! I have updated your name in my memory. I will call you {cand_name}."
+            }.get(det_lang, f"Hello {cand_name}! I have updated your name in my memory. I will call you {cand_name}.")
+            yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+            return
+
+    # Inquiries about user's name (e.g. "What is my name?", "Who am I?")
+    is_ask_name = any(k in lower_uq for k in [
+        'what is my name', "what's my name", 'who am i', 'do you know my name',
+        'tell me my name', 'मेरा नाम क्या है', 'माझे नाव काय आहे', 'મારું નામ શું છે'
+    ])
+    if is_ask_name:
+        if memory_data.get("user_name"):
+            name = memory_data['user_name']
+            ack = {
+                "hi": f"आपका नाम {name} है!",
+                "mr": f"तुमचे नाव {name} आहे!",
+                "gu": f"તમારું નામ {name} છે!",
+                "en": f"Your name is {name}!"
+            }.get(det_lang, f"Your name is {name}!")
+            yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+            return
+        else:
+            ack = {
+                "hi": "आपने अभी तक मुझे अपना नाम नहीं बताया है! आपका नाम क्या है?",
+                "mr": "तुम्ही मला अजून तुमचे नाव सांगितले नाही! तुमचे नाव काय आहे?",
+                "gu": "તમે મને હજી સુધી તમારું નામ નથી કહ્યું!",
+                "en": "You haven't told me your name yet! What should I call you?"
+            }.get(det_lang, "You haven't told me your name yet! What should I call you?")
+            yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+            return
+
+    # General Remember command ("remember that X")
     is_remember = re.search(r'\b(?:remember\s+that|remember\s+this|remember|याद\s+रखना\s+कि|याद\s+रखना|लक्षात\s+ठेव\s+की|लक्षात\s+ठेव|યાદ\s+રાખજે\s+કે|યાદ\s+રાખ)\s+(.+)', user_query, re.IGNORECASE)
     if is_remember:
         raw_fact = is_remember.group(1).strip()
-        
-        # Check if user stated their identity/name (e.g., "I am Rajesh and remember that...")
         name_match = re.search(r'\b(?:i\s+am|my\s+name\s+is|mera\s+naam\s+hai|mera\s+naam|maaza\s+naav)\s+([A-Z][a-zA-Z]+)\b', user_query, re.IGNORECASE)
         if name_match:
             user_name_found = name_match.group(1).title()
@@ -4634,16 +4768,18 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
             print(f"[USER NAME CAPTURED]: '{user_name_found}'")
             
         saved_fact = add_user_memory(raw_fact, lang=det_lang or "en")
-        user_prefix = f"{memory_data['user_name']}, " if memory_data.get("user_name") else ""
-        ack = {
-            "hi": f"समझ गई {user_prefix}! मैंने याद रख लिया कि {saved_fact}",
-            "mr": f"लक्षात ठेवले {user_prefix}! मी सेव्ह केले की {saved_fact}",
-            "gu": f"બરાબર {user_prefix}! મેં યાદ રાખી લીધું કે {saved_fact}",
-            "en": f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}."
-        }.get(det_lang, f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}.").strip()
-        yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
-        return
+        if saved_fact:
+            user_prefix = f"{memory_data['user_name']}, " if memory_data.get("user_name") else ""
+            ack = {
+                "hi": f"समझ गई {user_prefix}! मैंने याद रख लिया कि {saved_fact}",
+                "mr": f"लक्षात ठेवले {user_prefix}! मी सेव्ह केले की {saved_fact}",
+                "gu": f"બરાબર {user_prefix}! મેં યાદ રાખી લીધું કે {saved_fact}",
+                "en": f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}."
+            }.get(det_lang, f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}.").strip()
+            yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
+            return
 
+    # General Recall command ("what do you remember")
     is_recall_memory = any(k in lower_uq for k in [
         'what do you remember', 'what is in your memory', 'do you remember anything',
         'what are your memories', 'tell me my memories', 'मेरी मेमोरी में क्या है',
@@ -4659,7 +4795,6 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
                 "en": "My memory is completely clean and fresh! You haven't asked me to remember anything yet."
             }.get(det_lang, "My memory is completely clean and fresh! You haven't asked me to remember anything yet.")
         else:
-            # Format cleanly with 2nd-person perspective: 'You told me that your favorite color is blue.'
             items_str = ", and ".join(m.rstrip('.') for m in mem_list)
             ack = {
                 "hi": f"मुझे आपकी ये बातें याद हैं: {items_str}।",
@@ -4667,22 +4802,6 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
                 "gu": f"મને તમારા વિશે આ યાદ છે: {items_str}.",
                 "en": f"You told me that {items_str.lower() if items_str.startswith('Your') else items_str}."
             }.get(det_lang, f"You told me that {items_str.lower() if items_str.startswith('Your') else items_str}.")
-        yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
-        return
-
-    is_wipe_all = any(k in lower_uq for k in [
-        'clear all memory', 'clear memory', 'wipe your memory', 'delete all memories',
-        'forget everything', 'delete this memory from your mind', 'सारी मेमोरी डिलीट',
-        'सर्व मेमरी साफ', 'બધી મેમરી સાફ', 'બધું ભૂલી જાઓ'
-    ])
-    if is_wipe_all:
-        wipe_all_memories()
-        ack = {
-            "hi": "सारी मेमोरी साफ कर दी गई है! मेरा दिमाग अब बिल्कुल नया और खाली है।",
-            "mr": "सर्व मेमरी पूर्णपणे साफ केली आहे! माझे मन आता एकदम फ्रेश आहे.",
-            "gu": "બધી મેમરી સાફ કરી દીધી છે! હવે મારી મેમરી એકદમ નવી છે.",
-            "en": "All memories have been wiped clean! My memory is now completely fresh."
-        }.get(det_lang, "All memories have been wiped clean! My memory is now completely fresh.")
         yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
         return
 
@@ -5267,8 +5386,10 @@ Direct, natural, polite response. For simple queries, give a 1-2 sentence answer
     * If user asks for clothing & fashion: Recommend **Reliance Trends** or **Zudio** on Mahim Road (~850m).
   - When recommending any spot or store, always quote the exact shop name, street/landmark (e.g. Panch Batti, Mahim Road, or Vishnu Nagar), distance in meters/km, and travel time directly. Never say you don't know local stores.
 6. E-Commerce & Shopping: ALWAYS quote exact price with store (e.g. "Society Tea 1kg is ₹595 on Flipkart"). If user asked for specific brand, stick to that brand!
-- To remember a fact: [REMEMBER: <fact>]
-- To forget a fact: [FORGET: <fact>]
+- To remember or update a fact: [REMEMBER: <fact>]
+- To wipe or clear all memory: [WIPE_MEMORY]
+- To forget a specific fact: [FORGET: <fact>]
+- Absolute User Memory Authority: The user has 100% full authority to update, overwrite, or delete ANY fact (name, platform, age, preferences). NEVER refuse to update or say you cannot delete/update memory. ALWAYS warmly accept user updates and output [REMEMBER: <fact>] or [WIPE_MEMORY]!
 - Multi-Timer:
   • To set a timer: [TIMER_SET: <seconds> | <name> | <completion_message>]
   • To query timers: [TIMER_QUERY: <name_or_all>]
@@ -5473,19 +5594,24 @@ Direct, natural, polite response. For simple queries, give a 1-2 sentence answer
                 active_briefing["topic_id"] = None
                 print("[ACTIVE BRIEFING CANCELLED VIA LLM INTENT]")
 
+            # Handle [WIPE_MEMORY] tag
+            if "[WIPE_MEMORY]" in full_raw or "[WIPE_ALL]" in full_raw:
+                wipe_all_memories()
+                print("[LLM WIPE_MEMORY EXECUTED]")
+
             # Handle [REMEMBER: ...] tag
             rem_match = re.search(r'\[REMEMBER:\s*(.*?)\]', full_raw)
             if rem_match:
                 new_fact = rem_match.group(1).strip()
-                if new_fact and new_fact not in memory_data.get("notes", []):
-                    memory_data.setdefault("notes", []).append(new_fact)
-                    save_memory(memory_data)
-                    print(f"[MEMORY SAVED]: {new_fact}")
+                if new_fact:
+                    add_user_memory(new_fact, lang=definitive_lang)
+                    print(f"[MEMORY SAVED VIA LLM]: {new_fact}")
 
             # Handle [FORGET: ...] tag
             forg_match = re.search(r'\[FORGET:\s*(.*?)\]', full_raw)
             if forg_match:
                 to_forget = forg_match.group(1).strip().lower()
+                remove_user_memory(to_forget)
                 notes = memory_data.get("notes", [])
                 memory_data["notes"] = [n for n in notes if to_forget not in n.lower()]
                 save_memory(memory_data)
@@ -6194,8 +6320,10 @@ def run_offline_tts(text_to_speak: str) -> tuple[bytes | None, float]:
         print(f"Offline TTS Error: {e}")
         return None, (time.time() - t0) * 1000
 
+cartesia_lock = threading.Lock()
+
 def run_cartesia_tts(text_to_speak: str, lang: str = "en", context: str = "normal", radar_gain: float = 1.0, speed: float = 0.88) -> tuple[bytes | None, float, str]:
-    """Generates ultra-low-latency studio voice via Cartesia Sonic (16kHz S16LE raw PCM)."""
+    """Generates ultra-low-latency studio voice via Cartesia Sonic (16kHz S16LE raw PCM). Serialized via cartesia_lock to prevent 429 concurrency errors."""
     global cartesia_key_index, cartesia_cooldown_until
     
     clean_text = text_to_speak.strip() if text_to_speak else ""
@@ -6213,54 +6341,57 @@ def run_cartesia_tts(text_to_speak: str, lang: str = "en", context: str = "norma
     quota_exhausted_count = 0
     safe_speed = max(0.80, min(1.12, speed))
     
-    # Try current and remaining keys in pool
-    for attempt in range(len(CARTESIA_KEYS)):
-        current_key = CARTESIA_KEYS[cartesia_key_index]
-        payload = {
-            "model_id": "sonic-3.6",
-            "transcript": clean_text,
-            "voice": {"mode": "id", "id": voice_id},
-            "output_format": {
-                "container": "raw",
-                "encoding": "pcm_s16le",
-                "sample_rate": 16000
-            },
-            "generation_config": {
-                "speed": safe_speed
-            },
-            "language": lang
-        }
-        
-        t0 = time.time()
-        headers = {
-            "X-API-Key": current_key,
-            "Cartesia-Version": "2024-06-10",
-            "Content-Type": "application/json"
-        }
-        try:
-            resp = cloud_http_session.post("https://api.cartesia.ai/tts/bytes", json=payload, headers=headers, timeout=5.0)
-            if resp.status_code == 200:
-                raw_pcm = resp.content
-                dt = (time.time() - t0) * 1000
-                raw_pcm = apply_calibrated_volume_and_limiter(raw_pcm, voice_key=f"cartesia_{lang}", context=context, radar_gain=radar_gain, boost_clarity=(radar_gain > 1.15))
-                print(f"[CARTESIA SONIC ({dt:.0f} ms)]: Generated {len(raw_pcm)} bytes with {voice_name} ({lang.upper()} @ {safe_speed}x)")
-                return raw_pcm, dt, f"Cartesia Sonic ({voice_name})"
-            else:
-                dt = (time.time() - t0) * 1000
-                err_body = resp.text
-                print(f"[CARTESIA KEY {cartesia_key_index + 1} ERROR {resp.status_code}]: {err_body}")
-                if resp.status_code == 402 or "quota_exceeded" in err_body or "insufficient_credits" in err_body:
-                    quota_exhausted_count += 1
-                    cartesia_key_index = (cartesia_key_index + 1) % len(CARTESIA_KEYS)
-                    print(f"[CARTESIA ROTATE]: Switched to Key index {cartesia_key_index + 1}")
-                elif resp.status_code == 429:
-                    print(f"[CARTESIA 429]: Concurrency limit hit. Falling back to Microsoft Neural for this phrase.")
-                    break
+    # Strictly serialize Cartesia requests to keep concurrent connections <= 1, preventing 429 spikes
+    with cartesia_lock:
+        for attempt in range(max(2, len(CARTESIA_KEYS) * 2)):
+            current_key = CARTESIA_KEYS[cartesia_key_index]
+            payload = {
+                "model_id": "sonic-3.6",
+                "transcript": clean_text,
+                "voice": {"mode": "id", "id": voice_id},
+                "output_format": {
+                    "container": "raw",
+                    "encoding": "pcm_s16le",
+                    "sample_rate": 16000
+                },
+                "generation_config": {
+                    "speed": safe_speed
+                },
+                "language": lang
+            }
+            
+            t0 = time.time()
+            headers = {
+                "X-API-Key": current_key,
+                "Cartesia-Version": "2024-06-10",
+                "Content-Type": "application/json"
+            }
+            try:
+                resp = cloud_http_session.post("https://api.cartesia.ai/tts/bytes", json=payload, headers=headers, timeout=5.0)
+                if resp.status_code == 200:
+                    raw_pcm = resp.content
+                    dt = (time.time() - t0) * 1000
+                    raw_pcm = apply_calibrated_volume_and_limiter(raw_pcm, voice_key=f"cartesia_{lang}", context=context, radar_gain=radar_gain, boost_clarity=(radar_gain > 1.15))
+                    print(f"[CARTESIA SONIC ({dt:.0f} ms)]: Generated {len(raw_pcm)} bytes with {voice_name} ({lang.upper()} @ {safe_speed}x)")
+                    return raw_pcm, dt, f"Cartesia Sonic ({voice_name})"
                 else:
-                    break
-        except Exception as e:
-            print(f"Cartesia TTS Error: {e}")
-            break
+                    dt = (time.time() - t0) * 1000
+                    err_body = resp.text
+                    print(f"[CARTESIA KEY {cartesia_key_index + 1} ERROR {resp.status_code}]: {err_body}")
+                    if resp.status_code == 402 or "quota_exceeded" in err_body or "insufficient_credits" in err_body:
+                        quota_exhausted_count += 1
+                        cartesia_key_index = (cartesia_key_index + 1) % len(CARTESIA_KEYS)
+                        print(f"[CARTESIA ROTATE]: Switched to Key index {cartesia_key_index + 1}")
+                    elif resp.status_code == 429:
+                        print(f"[CARTESIA 429]: Rate limit detected. Backing off 250ms and retrying ({attempt + 1})...")
+                        time.sleep(0.25)
+                        continue
+                    else:
+                        break
+            except Exception as e:
+                print(f"Cartesia TTS Error: {e}")
+                time.sleep(0.2)
+                continue
             
     # Set cooldown ONLY if EVERY key in the pool was confirmed out of credits (402)
     if quota_exhausted_count >= len(CARTESIA_KEYS) and len(CARTESIA_KEYS) > 0:
@@ -6855,7 +6986,7 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
             chunk_size = 1024  # 1024 bytes = 512 samples = 32ms of 16kHz audio
             total_chunks_sent = 0
             stream_start = None
-            lead_target_sec = 0.160  # 160ms target lead (safe buffer, well within ESP32 300ms ring buffer)
+            lead_target_sec = 0.220  # 220ms target lead (safe buffer, well within ESP32 300ms ring buffer)
             first_event_sent = False
             leftover_pcm = b''
             
@@ -6899,8 +7030,8 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
                     stream_start = now
                     total_chunks_sent = 0
                     
-                    # Prime the ESP32 ring buffer with 2 chunks (~64ms, 2KB)
-                    prime_chunks = min(2, num_chunks)
+                    # Prime the ESP32 ring buffer with 3 chunks (~96ms, 3KB)
+                    prime_chunks = min(3, num_chunks)
                     for k in range(prime_chunks):
                         if not is_connected() or playback_interrupt_event.is_set():
                             break
