@@ -8020,7 +8020,7 @@ async def index(request):
                 <h1>Alexa Voice Assistant</h1>
                 <div style="color: var(--text-muted); font-size: 13px;">Smart Timers • Stopwatches • Alarms • Proactive Culinary Intelligence</div>
             </div>
-            <div id="status-badge" class="badge">Connecting...</div>
+            <div id="status-badge" class="badge status-online">Online</div>
         </header>
 
         <!-- Proactive Cooking Suggestion Alert -->
@@ -8040,7 +8040,7 @@ async def index(request):
         <!-- Assistant Status & Voice Engine -->
         <div class="grid-2">
             <div class="card">
-                <h3><span>🎙️ Assistant Status</span> <span id="status-text" style="color: #4ade80; font-size: 13px;">Connecting...</span></h3>
+                <h3><span>🎙️ Assistant Status</span> <span id="status-text" style="color: #4ade80; font-size: 13px;">Ready! Say "Alexa"</span></h3>
                 <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 8px;">
                     Wake Word: <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Say "Alexa"</span>
                 </div>
@@ -8185,15 +8185,21 @@ async def index(request):
 
         function connectWs() {
             ws = new WebSocket("ws://" + window.location.host + "/ws");
+            ws.onopen = function() {
+                let b = document.getElementById("status-badge");
+                if (b) { b.innerText = "Online"; b.className = "badge status-online"; }
+            };
             ws.onmessage = function(event) {
                 var msg = JSON.parse(event.data);
                 if (msg.type === "status") {
                     document.getElementById("status-text").innerText = msg.data;
                     let b = document.getElementById("status-badge");
-                    if (msg.data.includes("Ready") || msg.data.includes("Connected")) {
+                    if (msg.data.includes("Ready") || msg.data.includes("Connected") || msg.data.includes("Idle") || msg.data.includes("Alexa")) {
                         b.innerText = "Online"; b.className = "badge status-online";
-                    } else if (msg.data.includes("Listening") || msg.data.includes("Processing") || msg.data.includes("Synthesizing")) {
+                    } else if (msg.data.includes("Listening") || msg.data.includes("Processing") || msg.data.includes("Synthesizing") || msg.data.includes("Thinking")) {
                         b.innerText = "Active"; b.className = "badge status-active";
+                    } else if (msg.data.includes("Connecting") || msg.data.includes("reconnecting")) {
+                        b.innerText = "Connecting..."; b.className = "badge";
                     } else {
                         b.innerText = "Offline"; b.className = "badge status-offline";
                     }
@@ -8862,6 +8868,7 @@ async def websocket_handler(request):
     try:
         current_st = "Ready! Say 'Alexa' or click button below." if is_connected() else "Connecting to ESP32..."
         await ws.send_str(json.dumps({"type": "status", "data": current_st}))
+        await ws.send_str(json.dumps({"type": "memory", "data": memory_data}))
         await ws.send_str(json.dumps({"type": "timers", "data": get_timers_data()}))
         await ws.send_str(json.dumps({"type": "stopwatch", "data": get_stopwatch_data()}))
         await ws.send_str(json.dumps({"type": "alarms", "data": get_alarms_data()}))
