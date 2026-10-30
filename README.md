@@ -178,7 +178,7 @@ Watch the live hardware running directly from our workbench:
 * 📞 **Video 2: Live ESP32 VoIP Telephony Call ("Alexa, Call Myself" via Jio IMS SIP)**  
   ▶️ [Watch on YouTube Shorts](https://youtube.com/shorts/HGMN75dKRuE)
 * 🧠 **Video 3: Autonomous Long-Term Memory & Identity Recall ("Registered on Stardance")**  
-  ▶️ [Watch on YouTube Shorts]([INSERT_VIDEO_3_LINK_HERE]](https://youtu.be/rkv8eTRfRxI))
+  ▶️ [Watch on YouTube Shorts]((https://youtu.be/rkv8eTRfRxI))
 
 ---
 
