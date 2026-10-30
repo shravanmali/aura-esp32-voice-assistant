@@ -1495,6 +1495,9 @@ def invert_pronouns_for_storage(text: str, lang: str = "en") -> str:
     """Converts 1st-person user speech ('my favorite color is red') to 2nd-person assistant memory ('your favorite color is red')."""
     t = text.strip()
     if lang == "en":
+        # 1. Two-party interaction phrases: "I [have] [verb] you" -> "you [have] [verb] me"
+        t = re.sub(r'\bi\s+(have\s+)?([a-zA-Z]+)\s+you\b', r'you \1\2 me', t, flags=re.IGNORECASE)
+        t = re.sub(r'\bi\s+am\s+([a-zA-Z]+)\s+to\s+you\b', r'you are \1 to me', t, flags=re.IGNORECASE)
         for pat, repl in PRONOUN_MAP_EN:
             t = re.sub(pat, repl, t, flags=re.IGNORECASE)
         # Ensure proper capitalization
@@ -1612,6 +1615,10 @@ def save_memory(data):
     try:
         with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        try:
+            dispatch_async(broadcast("memory", data))
+        except Exception:
+            pass
     except Exception as e:
         print(f"Error saving memory.json: {e}")
 
@@ -4600,16 +4607,25 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
         return
 
     # --- FAST-PATH 0C: RESPONSIVE USER MEMORY (Remember, Recall, Forget, Wipe) ---
-    is_remember = re.search(r'^(?:alexa\s+)?(?:remember\s+that|remember\s+this|remember|याद\s+रखना\s+कि|याद\s+रखना|लक्षात\s+ठेव\s+की|लक्षात\s+ठेव|યાદ\s+રાખજે\s+કે|યાદ\s+રાખ)\s+(.+)', user_query, re.IGNORECASE)
+    is_remember = re.search(r'\b(?:remember\s+that|remember\s+this|remember|याद\s+रखना\s+कि|याद\s+रखना|लक्षात\s+ठेव\s+की|लक्षात\s+ठेव|યાદ\s+રાખજે\s+કે|યાદ\s+રાખ)\s+(.+)', user_query, re.IGNORECASE)
     if is_remember:
         raw_fact = is_remember.group(1).strip()
+        
+        # Check if user stated their identity/name (e.g., "I am Rajesh and remember that...")
+        name_match = re.search(r'\b(?:i\s+am|my\s+name\s+is|mera\s+naam\s+hai|mera\s+naam|maaza\s+naav)\s+([A-Z][a-zA-Z]+)\b', user_query, re.IGNORECASE)
+        if name_match:
+            user_name_found = name_match.group(1).title()
+            memory_data["user_name"] = user_name_found
+            print(f"[USER NAME CAPTURED]: '{user_name_found}'")
+            
         saved_fact = add_user_memory(raw_fact, lang=det_lang or "en")
+        user_prefix = f"{memory_data['user_name']}, " if memory_data.get("user_name") else ""
         ack = {
-            "hi": f"समझ गई! मैंने याद रख लिया कि {saved_fact}",
-            "mr": f"लक्षात ठेवले! मी सेव्ह केले की {saved_fact}",
-            "gu": f"બરાબર! મેં યાદ રાખી લીધું કે {saved_fact}",
-            "en": f"Got it! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}."
-        }.get(det_lang, f"Got it! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}.")
+            "hi": f"समझ गई {user_prefix}! मैंने याद रख लिया कि {saved_fact}",
+            "mr": f"लक्षात ठेवले {user_prefix}! मी सेव्ह केले की {saved_fact}",
+            "gu": f"બરાબર {user_prefix}! મેં યાદ રાખી લીધું કે {saved_fact}",
+            "en": f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}."
+        }.get(det_lang, f"Got it {user_prefix}! I will remember that {saved_fact.lower().rstrip('.') if saved_fact.startswith('Your') else saved_fact.rstrip('.')}.").strip()
         yield from yield_fastpath_clauses(ack, det_lang or "en", is_followup=False)
         return
 
@@ -5168,12 +5184,13 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
     if live_context_str:
         live_context_str = "\n" + live_context_str
             
-    # Format Shravan's personal profile & memory
-    mem_items = memory_data.get("memories", [])
+    # Format user's personal profile & dynamic memory
+    mem_items = list(memory_data.get("memories", [])) + list(memory_data.get("notes", []))
+    user_name_prefix = f"User's name: {memory_data['user_name']}\n" if memory_data.get("user_name") else ""
     if mem_items:
-        dynamic_mem_str = "• " + "\n• ".join(mem_items)
+        dynamic_mem_str = user_name_prefix + "• " + "\n• ".join(mem_items)
     else:
-        dynamic_mem_str = "(Clean slate — No personal facts stored yet. Do not guess or invent personal facts about the user)."
+        dynamic_mem_str = user_name_prefix + "(Clean slate — No personal facts stored yet. Do not guess or invent personal facts about the user)."
 
     lang_names = {'en': 'English', 'mr': 'Marathi', 'hi': 'Hindi', 'gu': 'Gujarati'}
     user_lang_name = lang_names.get(det_lang, 'English')
@@ -8154,8 +8171,8 @@ async def index(request):
 
         <!-- PERSISTENT MEMORY -->
         <div class="card">
-            <h3>🧠 Persistent Memory Notes (Shravan)</h3>
-            <div id="memory-notes" class="log" style="font-size: 13px; max-height: 120px; overflow-y: auto;">Loading memory...</div>
+            <h3>🧠 Autonomous Long-Term Memory</h3>
+            <div id="memory-notes" class="log" style="font-size: 13px; max-height: 140px; overflow-y: auto;">Loading memory...</div>
         </div>
     </div>
 
@@ -8211,6 +8228,8 @@ async def index(request):
                     renderCookingBanner();
                 } else if (msg.type === "voice_mode") {
                     updateModeUI(msg.data.test_mode);
+                } else if (msg.type === "memory") {
+                    renderMemoriesData(msg.data);
                 } else {
                     var el = document.getElementById(msg.type);
                     if (el) el.innerText = msg.data;
@@ -8514,14 +8533,33 @@ async def index(request):
         }
         loadTestMode();
 
+        function renderMemoriesData(data) {
+            if (!data) return;
+            let allItems = [];
+            if (data.user_name) {
+                allItems.push(`👤 Registered User: <strong>${data.user_name}</strong>`);
+            }
+            if (data.memories && Array.isArray(data.memories)) {
+                allItems.push(...data.memories);
+            }
+            if (data.notes && Array.isArray(data.notes)) {
+                allItems.push(...data.notes);
+            }
+            let el = document.getElementById("memory-notes");
+            if (el) {
+                if (allItems.length === 0) {
+                    el.innerHTML = "<span style='color: #64748b;'>No memories stored yet. Say: \"Alexa, remember that...\"</span>";
+                } else {
+                    el.innerHTML = allItems.map(n => `<div style='padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); color: #f1f5f9;'>💡 ${n}</div>`).join("");
+                }
+            }
+        }
+
         function loadMemories() {
             fetch('/api/memory')
                 .then(r => r.json())
-                .then(data => {
-                    let notes = data.notes || [];
-                    let html = notes.map(n => `<div>• ${n}</div>`).join("");
-                    document.getElementById("memory-notes").innerHTML = html || "No notes saved yet.";
-                });
+                .then(data => renderMemoriesData(data))
+                .catch(e => console.error(e));
         }
         loadMemories();
 
