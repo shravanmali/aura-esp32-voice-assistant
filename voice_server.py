@@ -1627,14 +1627,29 @@ memory_data = load_memory()
 def is_connected():
     return client is not None and getattr(client, '_connection', None) is not None and getattr(client._connection, 'is_connected', False)
 
+last_stt_text = None
+last_ai_text = None
+last_metrics_data = None
+
 async def broadcast(msg_type, data):
     """Broadcasts real-time events to all connected web dashboard clients."""
+    global last_stt_text, last_ai_text, last_metrics_data
+    if msg_type == "stt":
+        last_stt_text = data
+    elif msg_type == "ai":
+        last_ai_text = data
+    elif msg_type == "metrics":
+        last_metrics_data = data
+        
     msg = json.dumps({"type": msg_type, "data": data}, ensure_ascii=False)
     for ws in list(ws_clients):
         try:
             await ws.send_str(msg)
         except Exception:
-            ws_clients.remove(ws)
+            try:
+                ws_clients.remove(ws)
+            except KeyError:
+                pass
 
 # --- AUDIO SYNTHESIS & CONDITIONING ---
 def make_chime_pcm(freq1=659.25, freq2=880.0, duration=0.45, sample_rate=16000) -> bytes:
@@ -8203,23 +8218,14 @@ async def index(request):
                     } else {
                         b.innerText = "Offline"; b.className = "badge status-offline";
                     }
+                } else if (msg.type === "stt") {
+                    let el = document.getElementById("stt");
+                    if (el) el.innerText = msg.data;
+                } else if (msg.type === "ai") {
+                    let el = document.getElementById("ai");
+                    if (el) el.innerText = msg.data;
                 } else if (msg.type === "metrics") {
-                    let m = msg.data;
-                    let firstWordVal = (m.first_word_ms && m.first_word_ms > 0) ? m.first_word_ms : (m.tts_ms && m.tts_ms > 0 ? m.tts_ms : (m.total_ms ? Math.round(m.total_ms * 0.7) : "--"));
-                    let firstWordText = `${firstWordVal} ms`;
-                    document.getElementById("metrics-bar").innerHTML = `
-                        <span class="metrics-pill">STT: ${m.stt_ms} ms</span>
-                        <span class="metrics-pill">LLM: ${m.llm_ms} ms</span>
-                        <span class="metrics-pill">TTS: ${m.tts_ms} ms</span>
-                        <span class="metrics-pill" style="color: #38bdf8; font-weight: bold; border-color: #0284c7; background: rgba(56, 189, 248, 0.1);">⚡ First Word (V2V): ${firstWordText}</span>
-                        <span class="metrics-pill" style="color: #4ade80; font-weight: bold;">Total: ${m.total_ms} ms</span>
-                    `;
-                    let elSpeechEnd = document.getElementById("ts-speech-end");
-                    let elFirstAudio = document.getElementById("ts-first-audio");
-                    let elV2v = document.getElementById("ts-v2v-latency");
-                    if (elSpeechEnd && m.speech_end_ts) elSpeechEnd.innerText = m.speech_end_ts;
-                    if (elFirstAudio && m.first_audio_ts) elFirstAudio.innerText = m.first_audio_ts;
-                    if (elV2v) elV2v.innerText = firstWordText;
+                    renderMetrics(msg.data);
                 } else if (msg.type === "timers") {
                     timersData = msg.data || [];
                     renderTimers();
@@ -8247,6 +8253,56 @@ async def index(request):
             };
         }
         connectWs();
+
+        function renderMetrics(m) {
+            if (!m) return;
+            let firstWordVal = (m.first_word_ms && m.first_word_ms > 0) ? m.first_word_ms : (m.tts_ms && m.tts_ms > 0 ? m.tts_ms : (m.total_ms ? Math.round(m.total_ms * 0.7) : "--"));
+            let firstWordText = `${firstWordVal} ms`;
+            let bar = document.getElementById("metrics-bar");
+            if (bar) {
+                bar.innerHTML = `
+                    <span class="metrics-pill">STT: ${m.stt_ms} ms</span>
+                    <span class="metrics-pill">LLM: ${m.llm_ms} ms</span>
+                    <span class="metrics-pill">TTS: ${m.tts_ms} ms</span>
+                    <span class="metrics-pill" style="color: #38bdf8; font-weight: bold; border-color: #0284c7; background: rgba(56, 189, 248, 0.1);">⚡ First Word (V2V): ${firstWordText}</span>
+                    <span class="metrics-pill" style="color: #4ade80; font-weight: bold;">Total: ${m.total_ms} ms</span>
+                `;
+            }
+            let elSpeechEnd = document.getElementById("ts-speech-end");
+            let elFirstAudio = document.getElementById("ts-first-audio");
+            let elV2v = document.getElementById("ts-v2v-latency");
+            if (elSpeechEnd && m.speech_end_ts) elSpeechEnd.innerText = m.speech_end_ts;
+            if (elFirstAudio && m.first_audio_ts) elFirstAudio.innerText = m.first_audio_ts;
+            if (elV2v) elV2v.innerText = firstWordText;
+        }
+
+        // Automatic Live Polling Fallback (dual-channel: instant WS + 2s polling)
+        function pollLiveState() {
+            fetch('/api/live_state')
+                .then(r => r.json())
+                .then(d => {
+                    if (!d) return;
+                    if (d.status) {
+                        let st = document.getElementById("status-text");
+                        if (st && !st.innerText.includes("Listening") && !st.innerText.includes("Thinking")) {
+                            st.innerText = d.status;
+                        }
+                    }
+                    if (d.stt) {
+                        let el = document.getElementById("stt");
+                        if (el && (!el.innerText || el.innerText === "Waiting for speech...")) el.innerText = d.stt;
+                    }
+                    if (d.ai) {
+                        let el = document.getElementById("ai");
+                        if (el && (!el.innerText || el.innerText === "Waiting for query...")) el.innerText = d.ai;
+                    }
+                    if (d.metrics) renderMetrics(d.metrics);
+                    if (d.memory) renderMemoriesData(d.memory);
+                })
+                .catch(e => console.warn("Poll state error:", e));
+        }
+        setInterval(pollLiveState, 2000);
+        pollLiveState();
 
         // --- CULINARY PROACTIVE BANNER ---
         function renderCookingBanner() {
@@ -8591,6 +8647,10 @@ async def index(request):
 </body>
 </html>
 """
+    initial_stt = last_stt_text if last_stt_text else "Waiting for speech..."
+    initial_ai = last_ai_text if last_ai_text else "Waiting for query..."
+    html = html.replace('<div id="stt" class="log">Waiting for speech...</div>', f'<div id="stt" class="log">{initial_stt}</div>')
+    html = html.replace('<div id="ai" class="log">Waiting for query...</div>', f'<div id="ai" class="log">{initial_ai}</div>')
     return web.Response(text=html, content_type='text/html')
 
 async def force_start(request):
@@ -8869,6 +8929,12 @@ async def websocket_handler(request):
         current_st = "Ready! Say 'Alexa' or click button below." if is_connected() else "Connecting to ESP32..."
         await ws.send_str(json.dumps({"type": "status", "data": current_st}))
         await ws.send_str(json.dumps({"type": "memory", "data": memory_data}))
+        if last_stt_text:
+            await ws.send_str(json.dumps({"type": "stt", "data": last_stt_text}))
+        if last_ai_text:
+            await ws.send_str(json.dumps({"type": "ai", "data": last_ai_text}))
+        if last_metrics_data:
+            await ws.send_str(json.dumps({"type": "metrics", "data": last_metrics_data}))
         await ws.send_str(json.dumps({"type": "timers", "data": get_timers_data()}))
         await ws.send_str(json.dumps({"type": "stopwatch", "data": get_stopwatch_data()}))
         await ws.send_str(json.dumps({"type": "alarms", "data": get_alarms_data()}))
@@ -8880,13 +8946,30 @@ async def websocket_handler(request):
         async for msg in ws:
             pass
     finally:
-        ws_clients.remove(ws)
+        try:
+            ws_clients.remove(ws)
+        except KeyError:
+            pass
     return ws
+
+async def api_live_state(request):
+    return web.json_response({
+        "status": "Ready! Say 'Alexa' or click button below." if is_connected() else "Connecting to ESP32...",
+        "is_connected": is_connected(),
+        "stt": last_stt_text,
+        "ai": last_ai_text,
+        "metrics": last_metrics_data,
+        "memory": memory_data,
+        "timers": get_timers_data(),
+        "stopwatch": get_stopwatch_data(),
+        "alarms": get_alarms_data()
+    })
 
 async def init_app():
     app = web.Application()
     app.router.add_get('/', index)
     app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/api/live_state', api_live_state)
     app.router.add_get('/start', force_start)
     app.router.add_get('/api/memory', api_memory)
     app.router.add_get('/api/test_voice', api_test_voice)
