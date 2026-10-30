@@ -354,23 +354,24 @@ class ESP32CallAudioBridge:
                 mic_rms = float(np.sqrt(np.mean(voice_eq ** 2)))
                 now_ts = time.time()
                 time_since_caller = now_ts - self.last_caller_audio_time
-                speaker_active = (self.caller_speaker_rms > 35.0) or (time_since_caller < 0.45)
+                speaker_active = (self.caller_speaker_rms > 40.0) or (time_since_caller < 0.45)
 
                 if speaker_active:
                     # When caller is speaking or speaker is active in room:
-                    # Attenuate mic completely so caller hears ZERO echo of themselves!
-                    target_gain = 0.0
+                    # Attenuate mic so caller hears zero echo of themselves, while allowing double-talk
+                    if mic_rms < 400.0:
+                        target_gain = 0.0
+                    else:
+                        target_gain = 0.85
                 else:
                     # Full duplex speech transmission when speaker is silent
-                    if mic_rms < 90.0:
-                        target_gain = 0.05  # Room noise floor gate
-                    else:
-                        target_gain = 1.80  # Full clear vocal boost
+                    target_gain = 1.80
 
                 # Smooth gain transition (20ms time constant) to prevent audible clicks/pops
                 self.current_out_gain = 0.70 * self.current_out_gain + 0.30 * target_gain
 
                 if self.current_out_gain < 0.01:
+                    # Keep VB-CABLE clocked with silence frame
                     silence_frame = b'\x00' * (out_samples_target * 4)
                     try:
                         self.outbound_stream.write(silence_frame)
@@ -468,15 +469,14 @@ class ESP32CallAudioBridge:
                     self.last_caller_audio_time = now
 
                 # Forward 16kHz 16-bit mono PCM to ESP32 MAX98357A speaker:
-                # If caller speech or ringtone is present (> 35 RMS): send real audio immediately (< 20ms latency).
-                # If dead silent (< 35 RMS): pace pure zero-bytes keepalive at 70ms to prevent driver underrun without buzz/hiss!
+                # Always forward live caller frames with vocal boost
                 if self.send_to_esp32_fn:
-                    if self.caller_speaker_rms > 35.0:
+                    if instant_rms > 35.0:
                         boosted_caller = np.clip(mono_16k * 1.5, -32767.0, 32767.0)
                         pcm_out = boosted_caller.astype(np.int16).tobytes()
                         self.send_to_esp32_fn(pcm_out)
                         last_sent_time = now
-                    elif (now - last_sent_time) > 0.070:
+                    elif (now - last_sent_time) > 0.050:
                         self.send_to_esp32_fn(silence_keepalive)
                         last_sent_time = now
 
