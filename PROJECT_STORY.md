@@ -6,6 +6,17 @@ Building a voice assistant that actually talks back with the lowest latency poss
 
 ---
 
+## 📺 Live Video Demos & Proof in Action
+
+Watch the live hardware running directly from our workbench:
+
+* 🌦️ **Video 1: Sub-Second Multi-Intent Voice Query (Live Weather & Bitcoin Price)**  
+  ▶️ [Watch on YouTube Shorts](https://youtube.com/shorts/PmZ0z8Imm-w)
+* 📞 **Video 2: Live ESP32 VoIP Telephony Call ("Alexa, Call Myself" via Jio IMS SIP)**  
+  ▶️ [Watch on YouTube Shorts](https://youtube.com/shorts/HGMN75dKRuE)
+
+---
+
 ## 1. The 5 Bare Components
 
 1. **ESP32-S3 DevKitC-1** (16MB Flash, 8MB Octal PSRAM)
@@ -63,6 +74,16 @@ We didn’t just build a basic voice trigger. We turned this tiny microcontrolle
 * **Talk & Listen Simultaneously:** Dual dedicated I2S hardware buses allow the mic to listen while the speaker is playing without audio dropouts.
 * **Instant Barge-In (< 20ms):** You never have to wait for Aura to finish speaking; talk mid-sentence and it immediately cuts off audio to listen.
 * **Software Feedback Cancellation:** Smart filtering prevents the mic from capturing speaker playback, stopping accidental self-triggers.
+
+### 🧠 Feature 5: Autonomous Conversational Memory Engine
+* **Passive Fact Extraction:** You don't need rigid syntax. Simply say "Remember that my bike keys are in the second drawer" or "I take my medicine after dinner", and Groq's prompt architecture autonomously tags and saves the fact into persistent JSON storage.
+* **Contextual Self-Reminders:** When you later ask "Where did I put my keys?" or "What do you remember about me?", it recalls the exact details instantly and answers conversationally.
+* **Voice-Controlled Memory Wiping:** Easily view or purge memories with commands like "What are your memories?" or "Forget that fact".
+
+### 🗣️ Feature 6: Dual-Tier Voice Engine (Ultra-Fast AI vs. Studio Fidelity)
+* **Tier 1 (Fastest — Cartesia Sonic AI):** Our primary ultra-low latency voice engine. Generates 16kHz raw PCM audio in under 200ms, enabling our sub-second conversation response times.
+* **Tier 2 (Highest Fidelity — Microsoft Cloud Neural):** Powered by Microsoft Indian Neural voices (Neerja, Swara, Aarohi, Dhwani). Slightly more latency (~600–900ms) but delivers deep emotional intonation and authentic vernacular pronunciation.
+* **Persona Lock:** Voice persona locks per conversation turn so Aura never abruptly changes accents or gender mid-speech.
 
 ---
 
