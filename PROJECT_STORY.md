@@ -14,6 +14,8 @@ Watch the live hardware running directly from our workbench:
   ▶️ [Watch on YouTube Shorts](https://youtube.com/shorts/PmZ0z8Imm-w)
 * 📞 **Video 2: Live ESP32 VoIP Telephony Call ("Alexa, Call Myself" via Jio IMS SIP)**  
   ▶️ [Watch on YouTube Shorts](https://youtube.com/shorts/HGMN75dKRuE)
+* 🧠 **Video 3: Autonomous Long-Term Memory & Identity Recall ("Registered on Stardance")**  
+  ▶️ [Watch on YouTube Shorts]([INSERT_VIDEO_3_LINK_HERE])
 
 ---
 
@@ -150,5 +152,36 @@ Here is the exact 31-feature roadmap we are building:
 * **Multilingual Vernacular Engine:** Switches naturally across Hindi, Gujarati, Marathi, and English without losing context.
 * **Interactive Voice Quizzer:** Multi-turn study quiz partner for engineering concepts, tech trivia, and exams.
 * **High-Speed Groq Cloud Pipeline:** Offloads all heavy reasoning to Groq LPUs over Wi-Fi (Whisper Turbo + Groq LLM) for instantaneous sub-second response times.
+
+---
+
+<a id="part-3-autonomous-long-term-memory-stardance-demo"></a>
+
+## 6. Part 3: Autonomous Long-Term Memory & Stardance Identity Demo 🧠
+
+Most DIY voice assistants suffer from instant amnesia — every query starts from scratch with zero context about who you are or what you're working on.
+
+In this update, I gave Aura persistent conversational memory that actually remembers facts across power cycles and conversations, without relying on static, hardcoded system prompts:
+
+### 💡 How the Live Demo Works:
+1. **Natural Identity & Project Stating:**  
+   I casually tell the assistant:  
+   > *"I am Shravan and I have registered you on Stardance platform."*  
+   Without any rigid commands or weird syntax, the backend extracts:
+   * **User Name:** `Shravan`
+   * **Platform Action:** `Registered on Stardance platform`
+   * Writes the fact directly into persistent storage and syncs live with our local web dashboard over WebSockets in real time.
+
+2. **Instant Conversational Recall (<600ms):**  
+   Right after, I ask:  
+   > *"Where did I register you?"*  
+   Aura checks its persistent semantic memory slot and replies instantly:  
+   > *"You registered me on Stardance platform."*
+
+3. **Dynamic Slot Overwriting & Full User Control:**  
+   If I tell it a new project name or register it somewhere else later, it intelligently overwrites the previous platform slot instead of creating conflicting notes. And if I say *"Delete all your memory"*, it wipes the slate clean instantly.
+
+📺 **Watch the live hardware demo:** [Watch Video 3 on YouTube Shorts]([INSERT_VIDEO_3_LINK_HERE])
+
 
 
