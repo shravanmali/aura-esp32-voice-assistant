@@ -1672,8 +1672,8 @@ def optimize_audio_for_esp32(raw_pcm: bytes, sample_rate: int = 16000, threshold
             first_signal_idx = i
             break
             
-    # Keep 40ms of lead before first audible sample to guarantee starting consonants are 100% intact
-    lead_samples = int(sample_rate * 0.040)
+    # Keep 10ms of lead before first audible sample to guarantee starting consonants are intact without long dead-air pauses
+    lead_samples = int(sample_rate * 0.010)
     start_sample = max(0, first_signal_idx - lead_samples)
     
     # 2. Detect end of signal
@@ -1682,7 +1682,7 @@ def optimize_audio_for_esp32(raw_pcm: bytes, sample_rate: int = 16000, threshold
         if abs(samples[i]) > threshold:
             last_signal_idx = i
             break
-    trail_samples = int(sample_rate * 0.040)
+    trail_samples = int(sample_rate * 0.010)
     end_sample = min(len(samples), last_signal_idx + trail_samples)
     
     trimmed = samples[start_sample:end_sample]
@@ -4538,7 +4538,9 @@ def stream_groq_llm(user_query: str, detected_lang: str | None = None, cadence_i
         raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?।])\s+', text) if s.strip()]
         merged = []
         for s in raw_sentences:
-            if merged and len(merged[-1].split()) < 5:
+            if not merged:
+                merged.append(s)
+            elif len(merged[-1].split()) < 6 or len(s.split()) < 4:
                 merged[-1] = merged[-1] + " " + s
             else:
                 merged.append(s)
@@ -5380,14 +5382,17 @@ Direct, natural, polite response. For simple queries, give a 1-2 sentence answer
                                 words = cand_clean.split()
                                 should_emit = False
                                 if any(p in matched_punct for p in ['!', '?', '।', '\n']):
-                                    should_emit = len(words) >= 1 and len(cand_clean) >= 2
+                                    should_emit = len(words) >= 4 and len(cand_clean) >= 12
                                 elif '.' in matched_punct:
-                                    should_emit = len(words) >= 2 or len(cand_clean) >= 8
+                                    should_emit = len(words) >= 5 or len(cand_clean) >= 20
                                 elif ',' in matched_punct:
                                     should_emit = len(words) >= 10 and len(cand_clean) >= 40
                                     
-                                # Fast-Path Clause 1: Allow opening clauses (>= 3 words) to emit immediately so TTS begins under 200ms
-                                if should_emit and len(clean_speech_accum) == 0 and len(words) < 3:
+                                # Opening Clause 1: Require at least 4 words so audio plays for >1.2s, giving background pipeline ample time to prefetch Clause 2
+                                if should_emit and len(clean_speech_accum) == 0 and len(words) < 4:
+                                    should_emit = False
+                                # Subsequent Clauses: Avoid tiny 1-3 word fragments that starve the audio buffer; accumulate until >= 6 words
+                                elif should_emit and len(clean_speech_accum) > 0 and len(words) < 6:
                                     should_emit = False
                                     
                                 if should_emit:
@@ -6814,9 +6819,9 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
             chunk_size = 1024  # 1024 bytes = 512 samples = 32ms of 16kHz audio
             total_chunks_sent = 0
             stream_start = None
-            lead_target_sec = 0.250  # 250ms target lead smoothly buffered in ESP32 300ms buffer
-            burst_done = False
+            lead_target_sec = 0.160  # 160ms target lead (safe buffer, well within ESP32 300ms ring buffer)
             first_event_sent = False
+            leftover_pcm = b''
             
             while True:
                 if playback_interrupt_event.is_set():
@@ -6833,35 +6838,71 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
                 # Ensure 16-bit PCM word alignment
                 if len(pcm_bytes) % 2 != 0:
                     pcm_bytes = pcm_bytes[:-1]
-                    
+                
+                # Gapless contiguous waveform chaining: stitch with unpadded leftover bytes from previous clause
+                data = leftover_pcm + pcm_bytes
+                leftover_pcm = b''
+                
+                total_bytes = len(data)
+                num_chunks = total_bytes // chunk_size
+                if num_chunks == 0:
+                    # Keep fractional chunk for the next clause instead of inserting zero padding mid-sentence!
+                    leftover_pcm = data
+                    continue
+                
+                usable_bytes = num_chunks * chunk_size
+                leftover_pcm = data[usable_bytes:]
+                data = data[:usable_bytes]
+                
+                now = time.monotonic()
                 if not first_event_sent:
                     client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": label_text})
                     client.send_voice_assistant_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, None)
                     first_event_sent = True
                     set_aura_led("speaking")
-                    stream_start = time.monotonic()
+                    stream_start = now
+                    total_chunks_sent = 0
                     
-                total_bytes = len(pcm_bytes)
-                offset = 0
-                
-                # Burst the first 3 chunks (~96ms, 3KB) to cleanly prime ESP32 300ms I2S DMA ring buffer
-                if not burst_done:
-                    burst_chunks = min(3, (total_bytes + chunk_size - 1) // chunk_size)
-                    for k in range(burst_chunks):
+                    # Prime the ESP32 ring buffer with 2 chunks (~64ms, 2KB)
+                    prime_chunks = min(2, num_chunks)
+                    for k in range(prime_chunks):
                         if not is_connected() or playback_interrupt_event.is_set():
                             break
                         start_idx = k * chunk_size
-                        chunk = pcm_bytes[start_idx:start_idx + chunk_size]
-                        if len(chunk) < chunk_size:
-                            chunk = chunk + (b'\x00' * (chunk_size - len(chunk)))
+                        chunk = data[start_idx:start_idx + chunk_size]
                         client.send_voice_assistant_audio(chunk)
                         record_speaker_audio_chunk(chunk)
                         total_chunks_sent += 1
-                        offset += chunk_size
-                    burst_done = True
+                    offset = prime_chunks * chunk_size
+                else:
+                    # Clause Chaining: evaluate physical DAC hardware buffer status
+                    dac_audio_sec = total_chunks_sent * 0.032
+                    elapsed_sec = now - stream_start
+                    buffer_remaining_sec = dac_audio_sec - elapsed_sec
+                    
+                    if buffer_remaining_sec < 0.040:
+                        # Hardware buffer underrun/starvation occurred while waiting for cloud TTS.
+                        # Resynchronize clock to current real-time so we NEVER dump a 1ms catch-up firehose!
+                        stream_start = now - max(0.0, buffer_remaining_sec)
+                        total_chunks_sent = int(max(0.0, buffer_remaining_sec) / 0.032)
+                        
+                        # Re-prime the starved DAC with 2 chunks (~64ms)
+                        prime_chunks = min(2, num_chunks)
+                        for k in range(prime_chunks):
+                            if not is_connected() or playback_interrupt_event.is_set():
+                                break
+                            start_idx = k * chunk_size
+                            chunk = data[start_idx:start_idx + chunk_size]
+                            client.send_voice_assistant_audio(chunk)
+                            record_speaker_audio_chunk(chunk)
+                            total_chunks_sent += 1
+                        offset = prime_chunks * chunk_size
+                    else:
+                        # Continuous playback: ESP32 buffer is healthy, continue seamless pacing
+                        offset = 0
                     
                 # Paced delivery of remaining chunks for this clause
-                for i in range(offset, total_bytes, chunk_size):
+                for i in range(offset, usable_bytes, chunk_size):
                     if playback_interrupt_event.is_set():
                         print("[STREAM INTERRUPTED]: Chunk delivery aborted mid-clause.")
                         break
@@ -6869,10 +6910,7 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
                         print("ESP32 disconnected during audio queue stream")
                         break
                         
-                    chunk = pcm_bytes[i:i+chunk_size]
-                    if len(chunk) < chunk_size:
-                        chunk = chunk + (b'\x00' * (chunk_size - len(chunk)))
-                        
+                    chunk = data[i:i+chunk_size]
                     dac_playback_time = total_chunks_sent * 0.032
                     target_send_time = stream_start + dac_playback_time - lead_target_sec
                     
@@ -6880,13 +6918,22 @@ async def stream_audio_queue_to_esp32(audio_queue: asyncio.Queue, label_text: st
                     if now < target_send_time:
                         await asyncio.sleep(target_send_time - now)
                     else:
-                        await asyncio.sleep(0.001)
+                        # Rate limiter guard: never send faster than 10ms (prevents ESP32 buffer overflow)
+                        await asyncio.sleep(0.010)
                         
                     if playback_interrupt_event.is_set():
                         break
                     client.send_voice_assistant_audio(chunk)
                     record_speaker_audio_chunk(chunk)
                     total_chunks_sent += 1
+            
+            # Flush final leftover bytes at end of speech
+            if leftover_pcm and not playback_interrupt_event.is_set() and is_connected():
+                final_chunk = leftover_pcm + (b'\x00' * (chunk_size - len(leftover_pcm)))
+                client.send_voice_assistant_audio(final_chunk)
+                record_speaker_audio_chunk(final_chunk)
+                total_chunks_sent += 1
+                leftover_pcm = b''
                     
             # 4. Wait for hardware DAC to physically finish acoustic playback of the full buffer into the room
             if not playback_interrupt_event.is_set() and first_event_sent and total_chunks_sent > 0:
