@@ -6,7 +6,7 @@ Aura is a sub-second, multi-lingual smart voice assistant and VoIP telephony bri
 
 ## 🌟 Key Highlights
 
-- **⚡ Sub-Second Voice Latency (<800ms End-to-End)**: Powered by Groq's high-speed LPU infrastructure (`qwen/qwen3.8-27b` and `whisper-large-v3-turbo`).
+- **⚡ Sub-Second Voice Latency (<1100ms (approx) End-to-End)**: Powered by Groq's high-speed LPU infrastructure (`qwen/qwen3.8-27b` and `whisper-large-v3-turbo`).
 - **🎛️ Dual-Core Hardware Architecture**: ESP32-S3 running ESP-IDF 5.5.5 with Octal PSRAM at 240 MHz for high-fidelity 16 kHz I2S full-duplex audio.
 - **🛡️ Acoustic Echo Suppression (AES)**: Real-time 550ms hardware latency hangover window that dynamically mutes the microphone while the speaker plays caller audio, preventing feedback loops.
 - **📞 Landline Telephony Bridge (VoIP SIP)**: Native SIP landline calling over JioFiber IMS using MicroSIP, enabling voice commands like *"Alexa, call Mom"* or *"Alexa, call myself"*.
