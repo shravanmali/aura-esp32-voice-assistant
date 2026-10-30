@@ -1594,6 +1594,10 @@ def wipe_all_memories() -> bool:
         memory_data["memories"].clear()
     else:
         memory_data["memories"] = []
+    if "notes" in memory_data:
+        memory_data["notes"].clear()
+    else:
+        memory_data["notes"] = []
     memory_data["user_name"] = None
     save_memory(memory_data)
     print("[RESPONSIVE MEMORY]: All memories wiped clean!")
