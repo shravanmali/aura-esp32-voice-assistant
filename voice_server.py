@@ -76,10 +76,10 @@ GROQ_KEY = GROQ_KEYS[0]
 
 GROQ_MODEL = "qwen/qwen3.8-27b"  # 250ms ultra-fast multilingual reasoning model
 
-# Cartesia AI Voice Pool & Personas (Sub-600ms Raw PCM)
+# Cartesia AI Voice Pool & Personas (Sub-300ms Raw PCM)
 cartesia_key_index = 0
 cartesia_cooldown_until = 0
-tts_test_mode = True   # Fast-Path: Direct Microsoft Edge Neural (0 credits needed, 0ms failed retry delay)
+tts_test_mode = False   # Primary Tier 1: Cartesia Sonic Ultra-Low Latency Engine
 
 
 # --- CALIBRATED VOLUME NORMALIZATION & DYNAMIC GAIN ENGINE ---
