@@ -39,8 +39,29 @@ And of course, so much more! 😭😭😭😭
 
 <a id="part-2"></a>
 
-## Part 2: Pushing Silicon to Its Physical Limit 🚀
+## 3. Pushing ESP32 Silicon to Its Physical Limit: Full-Duplex Audio & Live Intelligence 🚀
 
-> *(Continued from the Developer Showcase Description)*
+We didn’t just build a basic voice trigger. We turned this tiny microcontroller into a living, full-duplex room presence that actively listens, adapts to ambient noise, dials real phone calls across the country, and fetches live data from the web in milliseconds.
 
-*(In progress — Drafting the next chapter: Full-Duplex Telephony Architecture, Acoustic Echo Suppression, and Ambient Voice Radar)*
+### 📞 Feature 1: Two-Way VoIP Landline Telephony
+* **Voice-Activated Dialing:** Saying "Alexa, call Mom" or "Call myself" parses the contact and instantly routes a live SIP call through Jio Fiber’s IMS exchange over secure TLS.
+* **Live Speakerphone:** The remote caller’s voice streams out of the MAX98357A speaker with zero lag, while the INMP441 mic beams 16kHz HD Voice (AMR-WB) back to their smartphone.
+* **Acoustic Echo Suppression (AES):** Intelligently ducks the room microphone when the remote party speaks, preventing feedback loops without dedicated DSP hardware.
+
+### 🔊 Feature 2: Smart Acoustic Radar (Auto-Volume & Room Noise Sensing)
+* **Room Noise Awareness:** Aura samples the ambient room noise floor before each response.
+* **Dynamic Volume Scaling:** Automatically speaks softly in a quiet room at night, and boosts volume and vocal clarity if a fan or AC is humming loudly.
+* **Zero Idle Hiss:** Audio drivers sleep during silence and wake seamlessly for audio streams, keeping the room completely silent when idle.
+
+### 🌐 Feature 3: Real-Time Web Intelligence & Live Tools
+* **Live Crypto & Market Data:** Ask "What's Bitcoin at?" to get live prices and real-time market movements on the fly.
+* **Hyper-Local Weather:** Instant live temperature, precipitation forecasts, and humidity for our exact coordinates.
+* **Offline Hardware Timers:** Hands-free timers with pleasant hardware chimes that trigger directly through the speaker even during Wi-Fi drops.
+* **Seamless Multilingual Brain:** Automatically switches and responds in English, Hindi, Gujarati, or Marathi with expressive human-like neural voices.
+
+### 🎙️ Feature 4: True Full-Duplex & Instant Barge-In (Beta Version)
+* **Talk & Listen Simultaneously:** Dual dedicated I2S hardware buses allow the mic to listen while the speaker is playing without audio dropouts.
+* **Instant Barge-In (< 20ms):** You never have to wait for Aura to finish speaking; talk mid-sentence and it immediately cuts off audio to listen.
+* **Software Feedback Cancellation:** Smart filtering prevents the mic from capturing speaker playback, stopping accidental self-triggers.
+
+
