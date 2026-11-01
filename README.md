@@ -4,15 +4,15 @@ Aura is a sub second multi-language smart voice assistant, & VoIP Telephony brid
 
 🌟 Features
 
-⚡ Sub-Second Voice Response (<1100ms (Approx) End-to-End) - Uses Groq's fast LPU to provide low latency responses (qwen/qwen3.8-27b and whisper-large-v3-turbo).
+- ⚡ Sub-Second Voice Response (<1100ms (Approx) End-to-End) - Uses Groq's fast LPU to provide low latency responses (qwen/qwen3.8-27b and whisper-large-v3-turbo).
 
-🎛 Dual Core - ESP32-S3 with ESP-IDF 5.5.5 using Octal PSRAM @ 240MHz for high quality 16kHz I2S full duplex audio.
+- 🎛 Dual Core - ESP32-S3 with ESP-IDF 5.5.5 using Octal PSRAM @ 240MHz for high quality 16kHz I2S full duplex audio.
 
-🛡 Acoustic Echo Suppression (AES) - Using a 550ms real time hardware hangover window to mute Microphone while playing caller's audio.
+- 🛡 Acoustic Echo Suppression (AES) - Using a 550ms real time hardware hangover window to mute Microphone while playing caller's audio.
 
-📞 Telephony Bridge (VoIP SIP) - Can make calls over Landline using SIP with JioFiber IMS. Just say "Alexa call Mom" or "Alexa call myself".
+- 📞 Telephony Bridge (VoIP SIP) - Can make calls over Landline using SIP with JioFiber IMS. Just say "Alexa call Mom" or "Alexa call myself".
 
-🌈 Aura 8-Bit WS2812 Light Effects - which is an responsive RGB LED that changes its colour according to the function live working on assistant.
+- 🌈 Aura 8-Bit WS2812 Light Effects - which is an responsive RGB LED that changes its colour according to the function live working on assistant.
 
 
 ## 💡 Aura 8-Bit RGB LED Status Patterns
