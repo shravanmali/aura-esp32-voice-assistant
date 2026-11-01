@@ -1,18 +1,19 @@
 # Aura ESP32-S3 Voice Assistant & Telephony Bridge (v0)
 
-Aura is a sub-second, multi-lingual smart voice assistant and VoIP telephony bridge built on the **ESP32-S3** microcontroller, featuring on-device wake-word detection, real-time Acoustic Echo Suppression (AES), Groq-powered STT & LLM reasoning, Microsoft Neural / Cartesia TTS, and an 8-bit WS2812 RGB LED status strip.
+Aura is a sub second multi-language smart voice assistant, & VoIP Telephony bridge that utilises the ESP32-S3 microcontroller with onboard wake-word detection, real-time AES, STT and LLM reasoning via Groq, Microsoft Neural / Cartesia TTS, and a 8bit WS2812 RGB LED status strip.
 
----
+🌟 Features
 
-## 🌟 Key Highlights
+⚡ Sub-Second Voice Response (<1100ms (Approx) End-to-End) - Uses Groq's fast LPU to provide low latency responses (qwen/qwen3.8-27b and whisper-large-v3-turbo).
 
-- **⚡ Sub-Second Voice Latency (<1100ms (approx) End-to-End)**: Powered by Groq's high-speed LPU infrastructure (`qwen/qwen3.8-27b` and `whisper-large-v3-turbo`).
-- **🎛️ Dual-Core Hardware Architecture**: ESP32-S3 running ESP-IDF 5.5.5 with Octal PSRAM at 240 MHz for high-fidelity 16 kHz I2S full-duplex audio.
-- **🛡️ Acoustic Echo Suppression (AES)**: Real-time 550ms hardware latency hangover window that dynamically mutes the microphone while the speaker plays caller audio, preventing feedback loops.
-- **📞 Landline Telephony Bridge (VoIP SIP)**: Native SIP landline calling over JioFiber IMS using MicroSIP, enabling voice commands like *"Alexa, call Mom"* or *"Alexa, call myself"*.
-- **🌈 Aura 8-Bit WS2812 Visual Feedback Engine**: Real-time responsive RGB LED light effects driven by ESP32 RMT hardware.
+🎛 Dual Core - ESP32-S3 with ESP-IDF 5.5.5 using Octal PSRAM @ 240MHz for high quality 16kHz I2S full duplex audio.
 
----
+🛡 Acoustic Echo Suppression (AES) - Using a 550ms real time hardware hangover window to mute Microphone while playing caller's audio.
+
+📞 Telephony Bridge (VoIP SIP) - Can make calls over Landline using SIP with JioFiber IMS. Just say "Alexa call Mom" or "Alexa call myself".
+
+🌈 Aura 8-Bit WS2812 Light Effects - which is an responsive RGB changes its colour according to the function live working on assistant.
+
 
 ## 💡 Aura 8-Bit RGB LED Status Patterns
 
