@@ -12,7 +12,7 @@ Aura is a sub second multi-language smart voice assistant, & VoIP Telephony brid
 
 📞 Telephony Bridge (VoIP SIP) - Can make calls over Landline using SIP with JioFiber IMS. Just say "Alexa call Mom" or "Alexa call myself".
 
-🌈 Aura 8-Bit WS2812 Light Effects - which is an responsive RGB changes its colour according to the function live working on assistant.
+🌈 Aura 8-Bit WS2812 Light Effects - which is an responsive RGB LED that changes its colour according to the function live working on assistant.
 
 
 ## 💡 Aura 8-Bit RGB LED Status Patterns
